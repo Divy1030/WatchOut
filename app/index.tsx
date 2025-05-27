@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 20, // Increased to account for status bar
+    paddingTop: 25, // Increased to account for status bar
     paddingBottom: 20,
   },
   logo: {
