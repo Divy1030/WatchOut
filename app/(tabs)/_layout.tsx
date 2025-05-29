@@ -10,9 +10,9 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarStyle: {
-          backgroundColor: Colors.surface,
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
+          backgroundColor: '#1e1f22', // Discord dark theme
+          borderTopColor: 'transparent',
+          borderTopWidth: 0,
           height: 60,
           paddingBottom: 8,
           paddingTop: 8,
@@ -29,34 +29,27 @@ export default function TabLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size || 20} color={color} />
+            <Ionicons name="home" size={size || 24} color={color} />
+          ),
+          tabBarBadge: 62, // Badge count like in your screenshots
+          tabBarBadgeStyle: { backgroundColor: '#ed4245' }, // Discord red
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: 'Notifications',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications" size={size || 24} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="search"
+        name="you"
         options={{
-          title: 'Search',
+          title: 'You',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={size || 20} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="watchlist"
-        options={{
-          title: 'Watchlist',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="bookmark" size={size || 20} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size || 20} color={color} />
+            <Ionicons name="person" size={size || 24} color={color} />
           ),
         }}
       />

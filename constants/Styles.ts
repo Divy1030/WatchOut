@@ -1,13 +1,8 @@
-import { Dimensions, StyleSheet } from 'react-native';
 import { Colors } from './Colors';
 
-const { width, height } = Dimensions.get('window');
+export { Colors };
 
-export const GlobalStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+export const GlobalStyles = {
   safeArea: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -16,37 +11,22 @@ export const GlobalStyles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: Colors.background,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  shadow: {
-    shadowColor: Colors.text,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-});
+};
 
-export const Typography = StyleSheet.create({
+export const Typography = {
   h1: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  h2: {
     fontSize: 24,
     fontWeight: 'bold',
     color: Colors.text,
   },
-  h3: {
+  h2: {
     fontSize: 20,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  h3: {
+    fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
   },
@@ -57,24 +37,15 @@ export const Typography = StyleSheet.create({
   },
   body: {
     fontSize: 14,
-    color: Colors.text,
+    color: Colors.textSecondary,
   },
   caption: {
     fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  small: {
-    fontSize: 10,
     color: Colors.textMuted,
   },
-});
+};
 
 export const Layout = {
-  window: {
-    width,
-    height,
-  },
-  isSmallDevice: width < 375,
   spacing: {
     xs: 4,
     sm: 8,
@@ -85,11 +56,9 @@ export const Layout = {
   borderRadius: {
     sm: 4,
     md: 8,
-    lg: 16,
-    xl: 24,
+    lg: 12,
+    xl: 16,
+    round: 9999,
   },
 };
-
-// Re-export Colors for convenience
-export { Colors } from './Colors';
 
