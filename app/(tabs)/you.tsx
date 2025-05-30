@@ -2,22 +2,26 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Image,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
+import { useLogout } from '../../src/lib/queries';
 
 export default function ProfileScreen() {
   const [showNitroModal, setShowNitroModal] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   
+  const logout = useLogout();
+
   const statusOptions = [
     { id: 'online', label: 'Online', color: Colors.secondary, icon: 'checkmark-circle' },
     { id: 'idle', label: 'Idle', color: '#faa61a', icon: 'moon' },
@@ -28,6 +32,15 @@ export default function ProfileScreen() {
   const handleStatusChange = (status: string) => {
     Alert.alert('Status Changed', `Your status has been changed to ${status}`);
     setShowStatusMenu(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout.mutateAsync();
+      // The auth guard will automatically redirect to the login screen
+    } catch (error) {
+      Alert.alert('Error', 'Failed to log out. Please try again.');
+    }
   };
 
   const StatusModal = () => (
@@ -232,9 +245,19 @@ export default function ProfileScreen() {
 
         {/* Logout */}
         <View style={styles.logoutSection}>
-          <Pressable style={styles.logoutButton}>
-            <Ionicons name="log-out" size={22} color={Colors.error} />
-            <Text style={styles.logoutText}>Log Out</Text>
+          <Pressable 
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            disabled={logout.isPending}
+          >
+            {logout.isPending ? (
+              <ActivityIndicator color={Colors.error} />
+            ) : (
+              <>
+                <Ionicons name="log-out" size={22} color={Colors.error} />
+                <Text style={styles.logoutText}>Log Out</Text>
+              </>
+            )}
           </Pressable>
         </View>
       </ScrollView>
