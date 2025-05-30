@@ -1,124 +1,258 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-    FlatList,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View
+  ActivityIndicator,
+  FlatList,
+  Keyboard,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChatMessage } from '../../components/ChatMessage';
 import { Colors } from '../../constants/Colors';
-
-interface Message {
-  id: string;
-  text: string;
-  sender: 'me' | 'other';
-  timestamp: string;
-  avatar?: string;
-  username?: string;
-}
+import {
+  useDirectMessages,
+  useFriendsList,
+  useSendDirectMessage
+} from '../../src/lib/queries';
+import {
+  initializeSocket,
+  joinDirectMessageRoom,
+  onMessageDeleted,
+  onMessageReaction,
+  onMessageUpdated,
+  onNewDirectMessage,
+  onTypingIndicator,
+  removeAllListeners,
+  sendTypingIndicator
+} from '../../src/lib/socket';
+import { useAuth } from '../../src/providers/AuthProvider';
+import { Message } from '../../src/types/message';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
+  const { user } = useAuth();
   const [inputText, setInputText] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | number | null>(null);
   
-  // Get chat details based on ID
-  const chatDetails = {
-    id: id as string,
-    name: "Rishi",
-    avatar: "https://via.placeholder.com/40/7289da/ffffff?text=R",
-    status: "online",
+  // State for messages
+  const [messages, setMessages] = useState<Message[]>([]);
+  
+  // Fetch direct messages from API
+  const { 
+    data: messagesData, 
+    isLoading: isLoadingMessages,
+    error: messagesError
+  } = useDirectMessages(id as string);
+  
+  // Get friend details
+  const { data: friendsData } = useFriendsList();
+
+  // Send message mutation
+  const sendMessageMutation = useSendDirectMessage();
+  
+  // Find the friend details based on the ID
+  const friend = friendsData?.data?.friends?.find(
+    (f: any) => f.userId?._id === id && f.status === 'accepted'
+  );
+  
+  const friendDetails = friend?.userId || {
+    _id: id as string,
+    username: 'Loading...',
+    displayName: 'Loading...',
+    avatarUrl: '',
+    status: 'offline'
   };
+
+  // Initialize socket connection and join room
+  useEffect(() => {
+    const setupSocket = async () => {
+      try {
+        // Initialize socket connection
+        await initializeSocket();
+        
+        // Join the direct message room
+        joinDirectMessageRoom(id as string);
+        
+        // Listen for new direct messages
+        onNewDirectMessage((newMessage: Message) => {
+          // Check if this message belongs to this conversation
+          const conversationId = [user?._id, id].sort().join('_');
+          if (newMessage.directMessageId === conversationId || 
+              (newMessage.sender._id === id && user?._id) ||
+              (newMessage.sender._id === user?._id && id)) {
+            setMessages(prev => [newMessage, ...prev]);
+          }
+        });
+        
+        // Listen for message updates
+        onMessageUpdated((updatedMessage: Message) => {
+          setMessages(prev => prev.map(msg => 
+            msg._id === updatedMessage._id ? updatedMessage : msg
+          ));
+        });
+        
+        // Listen for message deletions
+        onMessageDeleted((messageId: string) => {
+          if (messageId) {
+            setMessages(prev => prev.filter(msg => msg._id !== messageId));
+          }
+        });
+        
+        // Listen for reactions
+        onMessageReaction((updatedMessage: Message) => {
+          setMessages(prev => prev.map(msg => 
+            msg._id === updatedMessage._id ? updatedMessage : msg
+          ));
+        });
+        
+        // Listen for typing indicators
+        onTypingIndicator((data: {
+          userId: string;
+          username: string;
+          isTyping: boolean;
+          directMessageId?: string;
+        }) => {
+          // Show typing indicator if it's from the friend we're chatting with
+          if (data.userId === id) {
+            setIsTyping(data.isTyping);
+          }
+        });
+      } catch (error) {
+        console.error('Error setting up socket:', error);
+      }
+    };
+    
+    if (id && user?._id) {
+      setupSocket();
+    }
+    
+    // Clean up socket listeners
+    return () => {
+      removeAllListeners();
+    };
+  }, [id, user?._id]);
   
-  // Mock messages
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: "Sir contact us page me mail send karne ke liye api chaiye thi ma'am keh rahi thi usko karne ko",
-      sender: 'other',
-      timestamp: 'Yesterday at 9:08 PM',
-      avatar: "https://via.placeholder.com/40/5865f2/ffffff?text=D",
-      username: "Divy",
-    },
-    {
-      id: '2',
-      text: "Acha main dekhta hun",
-      sender: 'other',
-      timestamp: 'Yesterday at 9:53 PM',
-      avatar: "https://via.placeholder.com/40/7289da/ffffff?text=R",
-      username: "Rishi",
-    },
-    {
-      id: '3',
-      text: "sir latest wali branch main wali hai ya live",
-      sender: 'other',
-      timestamp: 'Yesterday at 10:14 PM',
-      avatar: "https://via.placeholder.com/40/5865f2/ffffff?text=D",
-      username: "Divy",
-    },
-    {
-      id: '4',
-      text: "Main",
-      sender: 'other',
-      timestamp: 'Yesterday at 10:17 PM',
-      avatar: "https://via.placeholder.com/40/7289da/ffffff?text=R",
-      username: "Rishi",
-    },
-    {
-      id: '5',
-      text: "ok sir",
-      sender: 'other',
-      timestamp: 'Yesterday at 10:17 PM',
-      avatar: "https://via.placeholder.com/40/5865f2/ffffff?text=D",
-      username: "Divy",
-    },
-    {
-      id: '6',
-      text: "sir main merge karke testing pe pr ki hai",
-      sender: 'other',
-      timestamp: '12:36 AM',
-      avatar: "https://via.placeholder.com/40/5865f2/ffffff?text=D",
-      username: "Divy",
-    },
-    {
-      id: '7',
-      text: "Koi build issue nhi hai to merge kardo",
-      sender: 'other',
-      timestamp: '12:37 AM',
-      avatar: "https://via.placeholder.com/40/7289da/ffffff?text=R",
-      username: "Rishi",
-    },
-    {
-      id: '8',
-      text: "thik hai sir",
-      sender: 'me',
-      timestamp: '12:39 AM',
-    },
-  ]);
+  // Update messages when data changes
+  useEffect(() => {
+    if (messagesData?.data) {
+      // messagesData.data should be an array of messages
+      setMessages(messagesData.data);
+    }
+  }, [messagesData]);
+  
+  // Set up keyboard listeners
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardWillShow', () => {
+      setKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardWillHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+  
+  // Handle typing indicator
+  const handleTyping = () => {
+    if (!user?._id || !id) return;
+    
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    // Send typing indicator
+    sendTypingIndicator({
+      userId: user._id,
+      username: user.username,
+      isTyping: true,
+      directMessageId: id as string
+    });
+    
+    // Set timeout to clear typing indicator
+    typingTimeoutRef.current = setTimeout(() => {
+      sendTypingIndicator({
+        userId: user._id,
+        username: user.username,
+        isTyping: false,
+        directMessageId: id as string
+      });
+    }, 1500);
+  };
   
   // Send message function
   const handleSendMessage = () => {
-    if (inputText.trim() === '') return;
+    if (!inputText.trim() || !id) return;
     
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text: inputText.trim(),
-      sender: 'me',
-      timestamp: new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    };
-    
-    setMessages([...messages, newMessage]);
-    setInputText('');
+    sendMessageMutation.mutate({
+      userId: id as string,
+      content: inputText.trim()
+    }, {
+      onSuccess: () => {
+        setInputText('');
+        
+        // Clear typing indicator
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+        }
+        if (user?._id) {
+          sendTypingIndicator({
+            userId: user._id,
+            username: user.username,
+            isTyping: false,
+            directMessageId: id as string
+          });
+        }
+      },
+      onError: (error) => {
+        console.error('Error sending message:', error);
+        // You could show a toast or error message here
+      }
+    });
   };
+  
+  // Clear typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, []);
+  
+  if (isLoadingMessages) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ActivityIndicator size="large" color={Colors.primary} style={styles.centerLoader} />
+      </SafeAreaView>
+    );
+  }
+
+  if (messagesError) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Failed to load messages</Text>
+          <Pressable 
+            style={styles.retryButton} 
+            onPress={() => window.location.reload()}
+          >
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
   
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -129,82 +263,112 @@ export default function ChatScreen() {
         </Pressable>
         
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>{chatDetails.name}</Text>
+          <Text style={styles.headerTitle}>
+            {friendDetails.displayName || friendDetails.username}
+          </Text>
           <View style={styles.row}>
-            <View style={[
-              styles.statusDot,
-              { backgroundColor: chatDetails.status === 'online' ? Colors.secondary : Colors.textMuted }
-            ]} />
+            <View 
+              style={[
+                styles.statusDot, 
+                { 
+                  backgroundColor: 
+                    friendDetails.status === 'online' ? Colors.secondary :
+                    friendDetails.status === 'idle' ? '#ffa500' :
+                    friendDetails.status === 'dnd' ? Colors.error :
+                    Colors.textMuted
+                }
+              ]} 
+            />
             <Text style={styles.headerSubtitle}>
-              {chatDetails.status === 'online' ? 'Online' : 'Offline'}
+              {friendDetails.status === 'dnd' ? 'Do Not Disturb' :
+               friendDetails.status === 'idle' ? 'Away' :
+               friendDetails.status.charAt(0).toUpperCase() + friendDetails.status.slice(1)}
             </Text>
           </View>
         </View>
         
-        <Pressable style={styles.headerButton}>
-          <Ionicons name="call" size={22} color={Colors.text} />
-        </Pressable>
-        <Pressable style={styles.headerButton}>
-          <Ionicons name="videocam" size={22} color={Colors.text} />
-        </Pressable>
+        <View style={styles.row}>
+          <Pressable style={styles.headerButton}>
+            <Ionicons name="call" size={22} color={Colors.text} />
+          </Pressable>
+          <Pressable style={styles.headerButton}>
+            <Ionicons name="videocam" size={22} color={Colors.text} />
+          </Pressable>
+          <Pressable style={styles.headerButton}>
+            <Ionicons name="ellipsis-vertical" size={22} color={Colors.text} />
+          </Pressable>
+        </View>
       </View>
       
       {/* Messages */}
       <FlatList
         data={messages}
-        renderItem={({ item, index }) => {
-          const isSameSenderAsPrevious = 
-            index > 0 && 
-            messages[index - 1].sender === item.sender &&
-            messages[index - 1].username === item.username;
-          
-          const isSameDay = 
-            index > 0 && 
-            item.timestamp.includes(messages[index - 1].timestamp.split(' ')[0]);
-          
-          const showHeader = !isSameSenderAsPrevious || !isSameDay;
-          
-          return <ChatMessage message={item} showHeader={showHeader} />;
-        }}
-        keyExtractor={(item) => item.id}
-        style={styles.messagesList}
+        renderItem={({ item }) => (
+          <ChatMessage 
+            message={item}
+            isMine={item.sender._id === user?._id}
+          />
+        )}
+        keyExtractor={(item) => item._id}
+        inverted
         contentContainerStyle={styles.messagesContent}
-        inverted={false}
+        showsVerticalScrollIndicator={false}
       />
       
-      {/* Date divider */}
-      <View style={styles.dateDivider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>May 30, 2025</Text>
-        <View style={styles.dividerLine} />
-      </View>
+      {/* Typing indicator */}
+      {isTyping && (
+        <View style={styles.typingContainer}>
+          <Text style={styles.typingText}>
+            {friendDetails.displayName || friendDetails.username} is typing...
+          </Text>
+        </View>
+      )}
       
-      {/* Input */}
-      <View style={styles.inputContainer}>
+      {/* Input area */}
+      <View style={[
+        styles.inputContainer,
+        keyboardVisible && styles.inputContainerKeyboard
+      ]}>
         <Pressable style={styles.inputButton}>
-          <Ionicons name="add" size={24} color={Colors.text} />
+          <Ionicons name="add" size={24} color={Colors.textMuted} />
         </Pressable>
-        <TextInput
-          ref={inputRef}
+        
+        <TextInput 
           style={styles.input}
-          placeholder="Message..."
+          placeholder="Message"
           placeholderTextColor={Colors.textMuted}
           value={inputText}
-          onChangeText={setInputText}
-          onFocus={() => setKeyboardVisible(true)}
-          onBlur={() => setKeyboardVisible(false)}
+          onChangeText={(text) => {
+            setInputText(text);
+            handleTyping();
+          }}
           multiline
+          ref={inputRef}
+          maxLength={2000}
         />
+        
         <Pressable style={styles.inputButton}>
-          <Ionicons name="happy" size={24} color={Colors.text} />
+          <Ionicons name="happy" size={24} color={Colors.textMuted} />
         </Pressable>
+        
         {inputText.trim() ? (
-          <Pressable style={styles.sendButton} onPress={handleSendMessage}>
-            <Ionicons name="send" size={20} color={Colors.text} />
+          <Pressable 
+            style={[
+              styles.sendButton,
+              sendMessageMutation.isPending && styles.sendButtonDisabled
+            ]} 
+            onPress={handleSendMessage}
+            disabled={sendMessageMutation.isPending}
+          >
+            {sendMessageMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.text} />
+            ) : (
+              <Ionicons name="send" size={20} color={Colors.text} />
+            )}
           </Pressable>
         ) : (
           <Pressable style={styles.inputButton}>
-            <Ionicons name="mic" size={24} color={Colors.text} />
+            <Ionicons name="mic" size={24} color={Colors.textMuted} />
           </Pressable>
         )}
       </View>
@@ -217,12 +381,41 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  centerLoader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    color: Colors.error,
+    fontSize: 16,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryText: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.surface,
+    backgroundColor: Colors.background,
   },
   backButton: {
     width: 40,
@@ -261,37 +454,32 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     borderRadius: 20,
   },
-  messagesList: {
-    flex: 1,
-  },
   messagesContent: {
     padding: 16,
-    paddingTop: 0,
+    paddingTop: 8,
   },
-  dateDivider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16,
-    paddingHorizontal: 16,
+  typingContainer: {
+    padding: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: Colors.surfaceLight,
+    borderRadius: 16,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.textMuted,
-    opacity: 0.3,
-  },
-  dividerText: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    marginHorizontal: 8,
+  typingText: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     padding: 8,
     backgroundColor: Colors.background,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  inputContainerKeyboard: {
+    paddingBottom: 8,
   },
   inputButton: {
     width: 40,
@@ -309,6 +497,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     maxHeight: 120,
+    minHeight: 40,
   },
   sendButton: {
     width: 40,
@@ -318,5 +507,8 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     backgroundColor: Colors.primary,
     borderRadius: 20,
-  }
+  },
+  sendButtonDisabled: {
+    opacity: 0.6,
+  },
 });

@@ -24,6 +24,11 @@ export const UserSchema = z.object({
   _id: z.string(),
   username: z.string(),
   email: z.string().email(),
+  displayName: z.string().optional(),
+  avatarUrl: z.string().optional(),
+  status: z.enum(['online', 'idle', 'dnd', 'invisible', 'offline']),
+  customStatus: z.string().optional(),
+  theme: z.enum(['dark', 'light']),
   online: z.boolean().default(false),
   role: z.enum(["admin", "participant"]),
   profilePicture: z.string().optional(),
@@ -92,3 +97,27 @@ export const GoogleLoginSchema = z.object({
 });
 
 export type GoogleLogin = z.infer<typeof GoogleLoginSchema>;
+
+// Friend schema
+export const FriendSchema = z.object({
+  userId: UserSchema,
+  status: z.enum(['pending', 'accepted', 'blocked']),
+  addedAt: z.string(),
+});
+
+export type Friend = z.infer<typeof FriendSchema>;
+
+// Friend request schema
+export const FriendRequestSchema = z.object({
+  targetUserId: z.string(),
+});
+
+export type FriendRequest = z.infer<typeof FriendRequestSchema>;
+
+// Friend response schema
+export const FriendResponseSchema = z.object({
+  requesterId: z.string(),
+  action: z.enum(['accept', 'reject']),
+});
+
+export type FriendResponse = z.infer<typeof FriendResponseSchema>;

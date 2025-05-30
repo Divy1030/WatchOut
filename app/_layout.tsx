@@ -1,14 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
-import LoadingScreen from '../components/LoadingScreen';
-import { useAuthStatus } from '../src/lib/queries';
+import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
 
 const queryClient = new QueryClient();
 
 // Authentication guard
 function AuthGuard() {
-  const { data: authStatus, isLoading } = useAuthStatus();
+  const { user, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -16,11 +15,11 @@ function AuthGuard() {
     // Skip redirection during initial loading
     if (isLoading) return;
     
-    console.log('Auth status:', authStatus?.isAuthenticated, 'Current path:', segments[0]);
+    console.log('Auth status:', !!user, 'Current path:', segments[0]);
 
     // If segments[0] is undefined, we are at the root path
     // Redirect authenticated users to the tabs
-    if (authStatus?.isAuthenticated && (!segments[0] || segments[0] === undefined)) {
+    if (user && (!segments[0] || segments[0] === undefined)) {
       console.log('Redirecting authenticated user to tabs from root');
       router.replace('/(tabs)/home');
       return;
@@ -29,20 +28,16 @@ function AuthGuard() {
     // Check if current route is in the auth group
     const isInAuthGroup = segments[0] === '(auth)';
 
-    if (!authStatus?.isAuthenticated && !isInAuthGroup) {
+    if (!user && !isInAuthGroup) {
       // Redirect to login if not authenticated and not in auth group
       console.log('Redirecting unauthenticated user to login');
       router.replace('/(auth)/login');
-    } else if (authStatus?.isAuthenticated && isInAuthGroup) {
-      // Redirect to home if authenticated and in auth group
-      console.log('Redirecting authenticated user from auth group to tabs');
+    } else if (user && isInAuthGroup) {
+      // Redirect to home if authenticated but in auth group
+      console.log('Redirecting authenticated user to home from auth group');
       router.replace('/(tabs)/home');
     }
-  }, [authStatus, isLoading, segments]);
-
-  if (isLoading) {
-    return <LoadingScreen />;
-  }
+  }, [isLoading, user, segments, router]);
 
   return <Slot />;
 }
@@ -50,7 +45,9 @@ function AuthGuard() {
 export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthGuard />
+      <AuthProvider>
+        <AuthGuard />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

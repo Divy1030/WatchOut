@@ -37,7 +37,7 @@ export default function ForgotPassword() {
     if (!validateForm()) return;
 
     try {
-      await forgotPassword.mutateAsync({ email });
+      await forgotPassword.mutateAsync(email);
       setSuccess(true);
     } catch (error: any) {
       if (error.response?.data?.message) {

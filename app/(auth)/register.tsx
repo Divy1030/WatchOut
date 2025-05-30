@@ -94,7 +94,7 @@ export default function Register() {
 
   const handleGoogleLogin = async (idToken: string) => {
     try {
-      await googleLogin.mutateAsync({ idToken });
+      await googleLogin.mutateAsync(idToken);
       router.replace('/');
     } catch (error: any) {
       alert('Google login failed. Please try again.');
