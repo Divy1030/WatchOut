@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import {
     FlatList,
     Image,
     Pressable,
     StyleSheet,
     Text,
-    View,
+    TextInput,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
@@ -23,10 +24,22 @@ interface Category {
   id: string;
   name: string;
   channels: Channel[];
+  expanded: boolean;
+}
+
+interface Message {
+  id: string;
+  user: string;
+  avatar: string;
+  content: string;
+  timestamp: string;
 }
 
 export default function ServerScreen() {
   const { id } = useLocalSearchParams();
+  const [selectedChannel, setSelectedChannel] = useState('1');
+  const [showMembers, setShowMembers] = useState(false);
+  const [messageText, setMessageText] = useState('');
   
   // Mock server data
   const serverData = {
@@ -38,48 +51,115 @@ export default function ServerScreen() {
   
   const server = serverData[id as keyof typeof serverData];
   
-  const categories: Category[] = [
+  const [categories, setCategories] = useState<Category[]>([
     {
       id: '1',
       name: 'TEXT CHANNELS',
+      expanded: true,
       channels: [
         { id: '1', name: 'general', type: 'text' },
         { id: '2', name: 'announcements', type: 'text', notifications: 2 },
         { id: '3', name: 'random', type: 'text' },
+        { id: '4', name: 'help', type: 'text' },
       ],
     },
     {
       id: '2',
       name: 'VOICE CHANNELS',
+      expanded: true,
       channels: [
-        { id: '4', name: 'General', type: 'voice' },
-        { id: '5', name: 'Meeting Room', type: 'voice' },
+        { id: '5', name: 'General', type: 'voice' },
+        { id: '6', name: 'Meeting Room', type: 'voice' },
+        { id: '7', name: 'Gaming Room', type: 'voice' },
       ],
     },
-  ];
-  
+  ]);
+
+  // Mock messages for selected channel
+  const [messages] = useState<Message[]>([
+    {
+      id: '1',
+      user: 'Daily Wellness AI',
+      avatar: 'https://via.placeholder.com/40/ed4245/ffffff?text=DW',
+      content: 'Welcome to #general! This is the start of the general channel.',
+      timestamp: 'Today at 12:00 PM',
+    },
+    {
+      id: '2',
+      user: 'Divy',
+      avatar: 'https://via.placeholder.com/40/5865f2/ffffff?text=D',
+      content: 'Hello everyone! Excited to be here!',
+      timestamp: 'Today at 12:05 PM',
+    },
+    {
+      id: '3',
+      user: 'Rishi',
+      avatar: 'https://via.placeholder.com/40/7289da/ffffff?text=R',
+      content: 'Hey there! Welcome to the team 👋',
+      timestamp: 'Today at 12:10 PM',
+    },
+  ]);
+
+  const toggleCategory = (categoryId: string) => {
+    setCategories(prev => prev.map(cat => 
+      cat.id === categoryId 
+        ? { ...cat, expanded: !cat.expanded }
+        : cat
+    ));
+  };
+
+  const getChannelName = () => {
+    for (const category of categories) {
+      const channel = category.channels.find(ch => ch.id === selectedChannel);
+      if (channel) return channel.name;
+    }
+    return 'general';
+  };
+
+  const sendMessage = () => {
+    if (messageText.trim()) {
+      // Handle message sending logic here
+      setMessageText('');
+    }
+  };
+
   const renderCategory = ({ item }: { item: Category }) => (
     <View style={styles.categoryContainer}>
-      <View style={styles.categoryHeader}>
-        <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
+      <Pressable 
+        style={styles.categoryHeader}
+        onPress={() => toggleCategory(item.id)}
+      >
+        <Ionicons 
+          name={item.expanded ? "chevron-down" : "chevron-forward"} 
+          size={12} 
+          color={Colors.textMuted} 
+        />
         <Text style={styles.categoryTitle}>{item.name}</Text>
         <Pressable style={styles.addChannelButton}>
           <Ionicons name="add" size={16} color={Colors.textMuted} />
         </Pressable>
-      </View>
+      </Pressable>
       
-      {item.channels.map((channel) => (
+      {item.expanded && item.channels.map((channel) => (
         <Pressable
           key={channel.id}
-          style={styles.channelItem}
-          onPress={() => router.push(`/channel/${channel.id}` as any)}
+          style={[
+            styles.channelItem,
+            selectedChannel === channel.id && styles.selectedChannel
+          ]}
+          onPress={() => setSelectedChannel(channel.id)}
         >
           <Ionicons 
             name={channel.type === 'text' ? 'chatbubble-outline' : 'volume-medium-outline'} 
             size={20} 
-            color={Colors.textMuted} 
+            color={selectedChannel === channel.id ? Colors.text : Colors.textMuted} 
           />
-          <Text style={styles.channelName}>{channel.name}</Text>
+          <Text style={[
+            styles.channelName,
+            selectedChannel === channel.id && styles.selectedChannelName
+          ]}>
+            {channel.name}
+          </Text>
           {channel.notifications && (
             <View style={styles.notificationBadge}>
               <Text style={styles.notificationText}>{channel.notifications}</Text>
@@ -90,25 +170,30 @@ export default function ServerScreen() {
     </View>
   );
 
+  const renderMessage = ({ item }: { item: Message }) => (
+    <View style={styles.messageContainer}>
+      <Image source={{ uri: item.avatar }} style={styles.messageAvatar} />
+      <View style={styles.messageContent}>
+        <View style={styles.messageHeader}>
+          <Text style={styles.messageUser}>{item.user}</Text>
+          <Text style={styles.messageTime}>{item.timestamp}</Text>
+        </View>
+        <Text style={styles.messageText}>{item.content}</Text>
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.mainLayout}>
-        {/* Left sidebar - Servers */}
-        <View style={styles.serversSidebar}>
-          <Pressable style={styles.serverItem} onPress={() => router.back()}>
-            <Ionicons name="chatbubbles-outline" size={24} color="#ffffff" />
-          </Pressable>
-          <View style={styles.divider} />
-          <View style={[styles.serverItem, styles.activeServer]}>
-            <Image source={{ uri: server?.icon }} style={styles.serverIcon} />
-          </View>
-        </View>
-
-        {/* Middle - Channels */}
+        {/* Left sidebar - Channels */}
         <View style={styles.channelsArea}>
           <View style={styles.serverHeader}>
-            <Text style={styles.serverName}>{server?.name}</Text>
-            <Pressable style={styles.serverMenuButton}>
+            <Pressable 
+              style={styles.serverHeaderContent}
+              onPress={() => {/* Show server menu */}}
+            >
+              <Text style={styles.serverName} numberOfLines={1}>{server?.name}</Text>
               <Ionicons name="chevron-down" size={16} color={Colors.text} />
             </Pressable>
           </View>
@@ -128,7 +213,7 @@ export default function ServerScreen() {
               style={styles.userAvatar}
             />
             <View style={styles.userDetails}>
-              <Text style={styles.userDisplayName}>Divy</Text>
+              <Text style={styles.userDisplayName} numberOfLines={1}>Divy</Text>
               <Text style={styles.userStatus}>Online</Text>
             </View>
             <Pressable style={styles.userAction}>
@@ -146,8 +231,18 @@ export default function ServerScreen() {
         {/* Right - Chat area */}
         <View style={styles.chatArea}>
           <View style={styles.chatHeader}>
-            <Ionicons name="chatbubble-outline" size={24} color={Colors.textMuted} />
-            <Text style={styles.chatChannelName}>general</Text>
+            <Pressable 
+              style={styles.backButton} 
+              onPress={() => router.back()}
+            >
+              <Ionicons name="chevron-back" size={24} color={Colors.text} />
+            </Pressable>
+            <Ionicons 
+              name="chatbubble-outline" 
+              size={24} 
+              color={Colors.textMuted} 
+            />
+            <Text style={styles.chatChannelName}>#{getChannelName()}</Text>
             <View style={styles.chatActions}>
               <Pressable style={styles.chatAction}>
                 <Ionicons name="notifications" size={20} color={Colors.textMuted} />
@@ -155,7 +250,10 @@ export default function ServerScreen() {
               <Pressable style={styles.chatAction}>
                 <Ionicons name="pin" size={20} color={Colors.textMuted} />
               </Pressable>
-              <Pressable style={styles.chatAction}>
+              <Pressable 
+                style={styles.chatAction}
+                onPress={() => setShowMembers(!showMembers)}
+              >
                 <Ionicons name="people" size={20} color={Colors.textMuted} />
               </Pressable>
               <Pressable style={styles.chatAction}>
@@ -164,11 +262,48 @@ export default function ServerScreen() {
             </View>
           </View>
           
-          <View style={styles.welcomeMessage}>
-            <Text style={styles.welcomeTitle}>Welcome to #{`general`}!</Text>
+          {/* Welcome Message */}
+          <View style={styles.welcomeSection}>
+            <Text style={styles.welcomeTitle}>Welcome to #{getChannelName()}!</Text>
             <Text style={styles.welcomeText}>
-              This is the start of the #general channel.
+              This is the start of the #{getChannelName()} channel.
             </Text>
+          </View>
+          
+          {/* Messages */}
+          <FlatList
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id}
+            style={styles.messagesList}
+            contentContainerStyle={styles.messagesContent}
+          />
+          
+          {/* Message Input */}
+          <View style={styles.inputContainer}>
+            <Pressable style={styles.inputButton}>
+              <Ionicons name="add" size={24} color={Colors.textMuted} />
+            </Pressable>
+            <TextInput
+              style={styles.input}
+              placeholder={`Message #${getChannelName()}`}
+              placeholderTextColor={Colors.textMuted}
+              value={messageText}
+              onChangeText={setMessageText}
+              multiline
+            />
+            <Pressable style={styles.inputButton}>
+              <Ionicons name="happy" size={24} color={Colors.textMuted} />
+            </Pressable>
+            {messageText.trim() ? (
+              <Pressable style={styles.sendButton} onPress={sendMessage}>
+                <Ionicons name="send" size={20} color={Colors.text} />
+              </Pressable>
+            ) : (
+              <Pressable style={styles.inputButton}>
+                <Ionicons name="mic" size={24} color={Colors.textMuted} />
+              </Pressable>
+            )}
           </View>
         </View>
       </View>
@@ -185,56 +320,26 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
   },
-  serversSidebar: {
-    width: 72,
-    backgroundColor: Colors.surface,
-    paddingTop: 10,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  serverItem: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.background,
-    marginVertical: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  activeServer: {
-    borderRadius: 16,
-  },
-  serverIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-  },
-  divider: {
-    width: 32,
-    height: 2,
-    backgroundColor: Colors.background,
-    marginVertical: 8,
-  },
   channelsArea: {
     width: 240,
     backgroundColor: Colors.surfaceLight,
   },
   serverHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: Colors.surface,
+  },
+  serverHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   serverName: {
     fontSize: 16,
     fontWeight: 'bold',
     color: Colors.text,
     flex: 1,
-  },
-  serverMenuButton: {
-    padding: 4,
+    marginRight: 8,
   },
   channelsList: {
     flex: 1,
@@ -267,11 +372,17 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     marginBottom: 2,
   },
+  selectedChannel: {
+    backgroundColor: Colors.surface,
+  },
   channelName: {
     flex: 1,
     fontSize: 16,
     color: Colors.textSecondary,
     marginLeft: 8,
+  },
+  selectedChannelName: {
+    color: Colors.text,
   },
   notificationBadge: {
     backgroundColor: Colors.error,
@@ -329,6 +440,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.surface,
   },
+  backButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
   chatChannelName: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -346,10 +464,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 8,
   },
-  welcomeMessage: {
+  welcomeSection: {
     padding: 16,
-    alignItems: 'center',
-    marginTop: 32,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   welcomeTitle: {
     fontSize: 24,
@@ -360,6 +478,78 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 16,
     color: Colors.textSecondary,
-    textAlign: 'center',
+  },
+  messagesList: {
+    flex: 1,
+  },
+  messagesContent: {
+    padding: 16,
+  },
+  messageContainer: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  messageAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  messageContent: {
+    flex: 1,
+  },
+  messageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  messageUser: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginRight: 8,
+  },
+  messageTime: {
+    fontSize: 12,
+    color: Colors.textMuted,
+  },
+  messageText: {
+    fontSize: 15,
+    color: Colors.text,
+    lineHeight: 20,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: Colors.background,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  inputButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: Colors.text,
+    maxHeight: 120,
+  },
+  sendButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+    backgroundColor: Colors.primary,
+    borderRadius: 20,
   },
 });
