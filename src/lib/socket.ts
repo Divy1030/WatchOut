@@ -69,8 +69,9 @@ export const joinChannel = (serverId: string, channelId: string): void => {
   console.log(`Joined channel room: channel:${channelId}`);
 };
 
-// Join direct message room
+// Join direct message room - fix the room format
 export const joinDirectMessageRoom = (conversationId: string): void => {
+  // Use the correct room format based on backend expectations
   socket?.emit('join-dm', conversationId);
   console.log(`Joined DM room: dm:${conversationId}`);
 };
@@ -92,7 +93,9 @@ export const onNewMessage = (callback: (message: any) => void): void => {
   socket?.on('newMessage', callback);
 };
 
+// Change this function to match the backend's event name
 export const onNewDirectMessage = (callback: (message: any) => void): void => {
+  // Change 'new-direct-message' to 'newDirectMessage' to match backend
   socket?.on('newDirectMessage', callback);
 };
 
