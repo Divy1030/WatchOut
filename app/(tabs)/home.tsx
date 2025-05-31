@@ -13,6 +13,8 @@ import {
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import CreateServerModal from '../../components/CreateServerModal';
+import JoinServerModal from '../../components/JoinServerModal';
 import { Colors } from '../../constants/Colors';
 import {
   useFriendsList,
@@ -46,6 +48,8 @@ interface DirectMessageItem {
 export default function HomeScreen() {
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [showCreateServerModal, setShowCreateServerModal] = useState(false);
+  const [showJoinServerModal, setShowJoinServerModal] = useState(false);
 
   // API hooks
   const { 
@@ -240,11 +244,17 @@ export default function HomeScreen() {
                 </View>
               )}
             </Pressable>
-            <Pressable style={styles.quickAction}>
+            <Pressable 
+              style={styles.quickAction}
+              onPress={() => setShowJoinServerModal(true)}
+            >
               <Ionicons name="add-circle" size={24} color={Colors.primary} />
               <Text style={styles.quickActionText}>Join Server</Text>
             </Pressable>
-            <Pressable style={styles.quickAction}>
+            <Pressable 
+              style={styles.quickAction}
+              onPress={() => setShowCreateServerModal(true)}
+            >
               <Ionicons name="create" size={24} color={Colors.primary} />
               <Text style={styles.quickActionText}>Create Server</Text>
             </Pressable>
@@ -258,43 +268,53 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Servers Section */}
+        {/* My Servers */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your Servers</Text>
-            <Text style={styles.sectionCount}>
-              {servers.length}
-            </Text>
+            <Text style={styles.sectionTitle}>My Servers</Text>
+            <Pressable onPress={() => setShowCreateServerModal(true)}>
+              <Ionicons name="add" size={24} color={Colors.primary} />
+            </Pressable>
           </View>
           
           {isLoadingServers ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color={Colors.primary} />
-              <Text style={styles.loadingText}>Loading servers...</Text>
-            </View>
+            <ActivityIndicator size="small" color={Colors.primary} style={{ margin: 16 }} />
           ) : servers.length === 0 ? (
-            <View style={styles.emptySection}>
-              <Ionicons name="server" size={48} color={Colors.textMuted} />
-              <Text style={styles.emptyTitle}>No servers yet</Text>
-              <Text style={styles.emptySubtitle}>
-                Join or create a server to get started
-              </Text>
+            <View style={styles.emptyState}>
+              <Ionicons name="server-outline" size={48} color={Colors.textMuted} />
+              <Text style={styles.emptyStateText}>No servers yet</Text>
+              <Text style={styles.emptyStateSubtext}>Create or join a server to get started</Text>
             </View>
           ) : (
-            <FlatList
-              data={servers.slice(0, 5)} // Show only first 5
-              renderItem={renderServerItem}
-              keyExtractor={item => item._id}
-              scrollEnabled={false}
-              ItemSeparatorComponent={() => <View style={styles.separator} />}
-            />
-          )}
-          
-          {servers.length > 5 && (
-            <Pressable style={styles.viewAllButton}>
-              <Text style={styles.viewAllText}>View All Servers</Text>
-              <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
-            </Pressable>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              contentContainerStyle={styles.serversList}
+            >
+              {servers.map((server: ServerItem, index: number) => (
+                <Pressable
+                  key={server._id || index}
+                  style={styles.serverItem}
+                  onPress={() => router.push(`/server/${server._id}`)}
+                >
+                  <View style={styles.serverIcon}>
+                    {server.iconUrl ? (
+                      <Image source={{ uri: server.iconUrl }} style={styles.serverIcon} />
+                    ) : (
+                      <Text style={styles.serverIconText}>
+                        {server.name ? server.name.charAt(0).toUpperCase() : 'S'}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.serverName} numberOfLines={1}>
+                    {server.name || 'Unnamed Server'}
+                  </Text>
+                  <Text style={styles.serverMembers}>
+                    {server.memberCount || 0} members
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
           )}
         </View>
 
@@ -347,6 +367,23 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Modals */}
+      <CreateServerModal
+        visible={showCreateServerModal}
+        onClose={() => setShowCreateServerModal(false)}
+        onSuccess={() => {
+          refetchServers();
+        }}
+      />
+
+      <JoinServerModal
+        visible={showJoinServerModal}
+        onClose={() => setShowJoinServerModal(false)}
+        onSuccess={() => {
+          refetchServers();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -633,5 +670,50 @@ const styles = StyleSheet.create({
   dmTimestamp: {
     fontSize: 12,
     color: Colors.textMuted,
+  },
+  // New styles for empty state and error handling
+  emptyState: {
+    alignItems: 'center',
+    padding: 32,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 12,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  errorContainer: {
+    alignItems: 'center',
+    padding: 16,
+  },
+  errorText: {
+    color: Colors.error,
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  retryButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  retryText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  serversList: {
+    paddingHorizontal: 4,
+  },
+  serverMembers: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 2,
   },
 });

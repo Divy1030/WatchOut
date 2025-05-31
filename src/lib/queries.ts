@@ -201,23 +201,41 @@ export const useUnblockUser = () => {
 
 // Server queries and mutations
 export const useUserServers = () => {
-  const { isAuthenticated } = useAuth();
-  
   return useQuery({
     queryKey: ['userServers'],
-    queryFn: () => serverApi.getUserServers(),
-    enabled: isAuthenticated
+    queryFn: async () => {
+      console.log('🔍 Fetching user servers...');
+      const result = await serverApi.getUserServers();
+      console.log('📊 Server query result:', result);
+      console.log('📊 Servers data:', result.data);
+      return result;
+    },
   });
 };
 
 export const useServerDetails = (serverId: string) => {
-  const { isAuthenticated } = useAuth();
-  
   return useQuery({
     queryKey: ['serverDetails', serverId],
-    queryFn: () => serverApi.getServerDetails(serverId),
-    enabled: isAuthenticated && !!serverId,
-    select: (data) => data?.data // Make sure to select the data property
+    queryFn: async () => {
+      console.log('🔍 Fetching server details for:', serverId);
+      const result = await serverApi.getServerDetails(serverId);
+      console.log('📊 Server details result:', result);
+      return result;
+    },
+    enabled: !!serverId,
+  });
+};
+
+export const useServerMembers = (serverId: string) => {
+  return useQuery({
+    queryKey: ['serverMembers', serverId],
+    queryFn: async () => {
+      console.log('🔍 Fetching server members for:', serverId);
+      const result = await serverApi.getServerMembers(serverId);
+      console.log('📊 Server members result:', result);
+      return result;
+    },
+    enabled: !!serverId,
   });
 };
 
@@ -225,11 +243,43 @@ export const useCreateServer = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: (data: { name: string, description?: string, iconUrl?: string }) => 
-      serverApi.createServer(data),
-    onSuccess: () => {
+    mutationFn: (data: { name: string; description?: string; iconUrl?: string }) => {
+      console.log('🏗️ Creating server with data:', data);
+      return serverApi.createServer(data);
+    },
+    onSuccess: (result) => {
+      console.log('✅ Server created successfully:', result);
       queryClient.invalidateQueries({ queryKey: ['userServers'] });
+    },
+    onError: (error) => {
+      console.error('❌ Server creation failed:', error);
     }
+  });
+};
+
+export const useJoinServerByCode = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (inviteCode: string) => {
+      console.log('🔗 Joining server with invite code:', inviteCode);
+      return serverApi.joinServerByCode(inviteCode);
+    },
+    onSuccess: (result) => {
+      console.log('✅ Successfully joined server:', result);
+      queryClient.invalidateQueries({ queryKey: ['userServers'] });
+    },
+    onError: (error: any) => {
+      console.error('❌ Failed to join server:', error);
+      console.error('Error details:', error.response?.data);
+    }
+  });
+};
+
+export const useCreateInvite = () => {
+  return useMutation({
+    mutationFn: ({ serverId, data }: { serverId: string; data: { maxUses?: number; expiresIn?: number } }) =>
+      serverApi.createInvite(serverId, data),
   });
 };
 
@@ -237,14 +287,12 @@ export const useUpdateServer = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: ({ serverId, data }: { 
-      serverId: string, 
-      data: { name?: string, description?: string, iconUrl?: string } 
-    }) => serverApi.updateServer(serverId, data),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['userServers'] });
+    mutationFn: ({ serverId, data }: { serverId: string; data: any }) =>
+      serverApi.updateServer(serverId, data),
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['serverDetails', variables.serverId] });
-    }
+      queryClient.invalidateQueries({ queryKey: ['userServers'] });
+    },
   });
 };
 
@@ -255,29 +303,7 @@ export const useDeleteServer = () => {
     mutationFn: (serverId: string) => serverApi.deleteServer(serverId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['userServers'] });
-    }
-  });
-};
-
-export const useServerMembers = (serverId: string) => {
-  const { isAuthenticated } = useAuth();
-  
-  return useQuery({
-    queryKey: ['serverMembers', serverId],
-    queryFn: () => serverApi.getServerMembers(serverId),
-    enabled: isAuthenticated && !!serverId
-  });
-};
-
-export const useJoinServer = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ serverId, inviteCode }: { serverId: string, inviteCode: string }) => 
-      serverApi.joinServer(serverId, inviteCode),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['userServers'] });
-    }
+    },
   });
 };
 
@@ -288,83 +314,16 @@ export const useLeaveServer = () => {
     mutationFn: (serverId: string) => serverApi.leaveServer(serverId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['userServers'] });
-    }
+    },
   });
 };
 
-export const useCreateChannel = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ serverId, data }: {
-      serverId: string,
-      data: {
-        name: string,
-        type: 'text' | 'voice',
-        topic?: string,
-        isPrivate?: boolean,
-        allowedRoles?: string[],
-        allowedUsers?: string[]
-      }
-    }) => serverApi.createChannel(serverId, data),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['serverDetails', variables.serverId] });
-    }
-  });
-};
-
-export const useUpdateChannel = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ serverId, channelId, data }: {
-      serverId: string,
-      channelId: string,
-      data: {
-        name?: string,
-        topic?: string,
-        position?: number,
-        isPrivate?: boolean,
-        allowedRoles?: string[],
-        allowedUsers?: string[]
-      }
-    }) => serverApi.updateChannel(serverId, channelId, data),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['serverDetails', variables.serverId] });
-    }
-  });
-};
-
-export const useDeleteChannel = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ serverId, channelId }: { serverId: string, channelId: string }) => 
-      serverApi.deleteChannel(serverId, channelId),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['serverDetails', variables.serverId] });
-    }
-  });
-};
-
-export const useCreateInvite = () => {
-  return useMutation({
-    mutationFn: ({ serverId, data }: { 
-      serverId: string, 
-      data?: { maxUses?: number, expiresIn?: number } 
-    }) => serverApi.createInvite(serverId, data)
-  });
-};
-
-// Messages queries and mutations
+// Channel message queries
 export const useChannelMessages = (serverId: string, channelId: string) => {
-  const { isAuthenticated } = useAuth();
-  
   return useQuery({
     queryKey: ['channelMessages', serverId, channelId],
     queryFn: () => messageApi.getChannelMessages(serverId, channelId),
-    enabled: isAuthenticated && !!serverId && !!channelId,
-    select: (data) => data?.data // Make sure to select the data property
+    enabled: !!serverId && !!channelId,
   });
 };
 
@@ -373,16 +332,16 @@ export const useSendChannelMessage = () => {
   
   return useMutation({
     mutationFn: ({ serverId, channelId, content, mentions = [] }: {
-      serverId: string,
-      channelId: string,
-      content: string,
-      mentions?: string[]
+      serverId: string;
+      channelId: string;
+      content: string;
+      mentions?: string[];
     }) => messageApi.sendChannelMessage(serverId, channelId, content, mentions),
-    onSuccess: (_data, variables) => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ 
         queryKey: ['channelMessages', variables.serverId, variables.channelId] 
       });
-    }
+    },
   });
 };
 

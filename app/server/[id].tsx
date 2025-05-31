@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChatMessage } from '../../components/ChatMessage';
+import ServerSettingsModal from '../../components/ServerSettingsModal';
 import { Colors } from '../../constants/Colors';
 import {
   useChannelMessages,
@@ -44,6 +45,7 @@ export default function ServerScreen() {
   const [messageText, setMessageText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [showServerSettings, setShowServerSettings] = useState(false);
   const typingTimeoutRef = useRef<number | null>(null);
   
   // Fetch server details and members
@@ -60,7 +62,7 @@ export default function ServerScreen() {
   
   // Extract server and members data properly
   const server = serverData?.data;
-  const members = membersData?.data || [];
+  const members = Array.isArray(membersData?.data) ? membersData.data : [];
   
   // Fetch channel messages only when a channel is selected
   const { 
@@ -262,20 +264,36 @@ export default function ServerScreen() {
   const textChannels = server?.channels?.filter((c: any) => c.type === 'text') || [];
   const voiceChannels = server?.channels?.filter((c: any) => c.type === 'voice') || [];
   
-  // Group members by status
+  // Group members by status - with proper safety checks
   const onlineMembers = members.filter((m: any) => 
-    m.userId?.status === 'online' || 
-    m.userId?.status === 'idle' || 
-    m.userId?.status === 'dnd'
-  );
-  const offlineMembers = members.filter((m: any) => 
-    m.userId?.status === 'offline' || 
-    m.userId?.status === 'invisible' ||
-    !m.userId?.status
+    m?.userId?.status === 'online' || 
+    m?.userId?.status === 'idle' || 
+    m?.userId?.status === 'dnd'
   );
 
+  const offlineMembers = members.filter((m: any) => 
+    m?.userId?.status === 'offline' || 
+    m?.userId?.status === 'invisible' ||
+    !m?.userId?.status
+  );
+
+  
   // Get selected channel name
   const selectedChannelName = server?.channels?.find((c: any) => c._id === selectedChannel)?.name || 'general';
+  
+  // Debugging useEffect
+  useEffect(() => {
+    console.log('🔍 Server Screen Debug Info:');
+    console.log('- Server ID:', id);
+    console.log('- Server Data:', serverData);
+    console.log('- Server:', server);
+    console.log('- Members Data:', membersData);
+    console.log('- Members Array:', members);
+    console.log('- Members Length:', members?.length);
+    console.log('- Is Loading Server:', isLoadingServer);
+    console.log('- Is Loading Members:', isLoadingMembers);
+    console.log('- Server Error:', serverError?.message);
+  }, [serverData, membersData, server, members, isLoadingServer, isLoadingMembers, serverError, id]);
   
   if (isLoadingServer) {
     return (
@@ -316,7 +334,7 @@ export default function ServerScreen() {
           <View style={styles.serverHeader}>
             <Pressable 
               style={styles.serverHeaderContent}
-              onPress={() => {/* Show server menu */}}
+              onPress={() => setShowServerSettings(true)}
             >
               <Text style={styles.serverName} numberOfLines={1}>
                 {server.name || 'Loading...'}
@@ -576,74 +594,120 @@ export default function ServerScreen() {
             {/* Members sidebar */}
             {showMembers && (
               <View style={styles.membersArea}>
-                <Text style={styles.membersHeader}>MEMBERS - {members.length}</Text>
+                <Text style={styles.membersHeader}>
+                  MEMBERS - {isLoadingMembers ? '...' : members.length}
+                </Text>
                 
-                {/* Online members */}
-                {onlineMembers.length > 0 && (
+                {isLoadingMembers ? (
+                  <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: 16 }} />
+                ) : members.length === 0 ? (
+                  <Text style={styles.noMembersText}>No members found</Text>
+                ) : (
                   <>
-                    <Text style={styles.memberCategory}>
-                      ONLINE - {onlineMembers.length}
-                    </Text>
-                    {onlineMembers.map((member: any) => (
-                      <View key={member.userId._id} style={styles.memberItem}>
-                        <View style={styles.memberAvatar}>
-                          <Image
-                            source={{ 
-                              uri: member.userId.avatarUrl || 
-                              `https://via.placeholder.com/32/5865f2/ffffff?text=${member.userId.username?.charAt(0).toUpperCase()}` 
-                            }}
-                            style={styles.memberAvatarImage}
-                          />
-                          <View 
-                            style={[
-                              styles.statusIndicator, 
-                              { 
-                                backgroundColor: 
-                                  member.userId.status === 'online' ? Colors.secondary :
-                                  member.userId.status === 'idle' ? Colors.warning :
-                                  member.userId.status === 'dnd' ? Colors.error :
-                                  Colors.textMuted 
-                              }
-                            ]} 
-                          />
-                        </View>
-                        <Text style={styles.memberName}>
-                          {member.nickname || member.userId.displayName || member.userId.username}
-                          {member.userId._id === server.owner && (
-                            <Text style={styles.ownerTag}> • Owner</Text>
-                          )}
+                    {/* Online members */}
+                    {onlineMembers.length > 0 && (
+                      <>
+                        <Text style={styles.memberCategory}>
+                          ONLINE - {onlineMembers.length}
                         </Text>
-                      </View>
-                    ))}
-                  </>
-                )}
-                
-                {/* Offline members */}
-                {offlineMembers.length > 0 && (
-                  <>
-                    <Text style={styles.memberCategory}>
-                      OFFLINE - {offlineMembers.length}
-                    </Text>
-                    {offlineMembers.map((member: any) => (
-                      <View key={member.userId._id} style={styles.memberItem}>
-                        <View style={styles.memberAvatar}>
-                          <Image
-                            source={{ 
-                              uri: member.userId.avatarUrl || 
-                              `https://via.placeholder.com/32/5865f2/ffffff?text=${member.userId.username?.charAt(0).toUpperCase()}` 
-                            }}
-                            style={[styles.memberAvatarImage, styles.offlineMember]}
-                          />
-                          <View style={[styles.statusIndicator, styles.offlineStatus]} />
-                        </View>
-                        <Text style={[styles.memberName, styles.offlineName]}>
-                          {member.nickname || member.userId.displayName || member.userId.username}
-                          {member.userId._id === server.owner && (
-                            <Text style={styles.ownerTag}> • Owner</Text>
-                          )}
+                        {onlineMembers.map((member: any) => {
+                          if (!member?.userId) {
+                            console.warn('Invalid member data:', member);
+                            return null;
+                          }
+                          
+                          return (
+                            <View key={member.userId._id} style={styles.memberItem}>
+                              <View style={styles.memberAvatar}>
+                                <Image
+                                  source={{ 
+                                    uri: member.userId.avatarUrl || 
+                                    `https://via.placeholder.com/32/5865f2/ffffff?text=${member.userId.username?.charAt(0).toUpperCase()}` 
+                                  }}
+                                  style={styles.memberAvatarImage}
+                                />
+                                <View 
+                                  style={[
+                                    styles.statusIndicator, 
+                                    { 
+                                      backgroundColor: 
+                                        member.userId.status === 'online' ? Colors.secondary :
+                                        member.userId.status === 'idle' ? Colors.warning :
+                                        member.userId.status === 'dnd' ? Colors.error :
+                                        Colors.textMuted 
+                                    }
+                                  ]} 
+                                />
+                              </View>
+                              <Text style={styles.memberName}>
+                                {member.nickname || member.userId.displayName || member.userId.username}
+                                {member.userId._id === server?.owner && (
+                                  <Text style={styles.ownerTag}> • Owner</Text>
+                                )}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </>
+                    )}
+                    
+                    {/* Offline members */}
+                    {offlineMembers.length > 0 && (
+                      <>
+                        <Text style={styles.memberCategory}>
+                          OFFLINE - {offlineMembers.length}
                         </Text>
+                        {offlineMembers.map((member: any) => {
+                          if (!member?.userId) {
+                            console.warn('Invalid member data:', member);
+                            return null;
+                          }
+                          
+                          return (
+                            <View key={member.userId._id} style={styles.memberItem}>
+                              <View style={styles.memberAvatar}>
+                                <Image
+                                  source={{ 
+                                    uri: member.userId.avatarUrl || 
+                                    `https://via.placeholder.com/32/5865f2/ffffff?text=${member.userId.username?.charAt(0).toUpperCase()}` 
+                                  }}
+                                  style={[styles.memberAvatarImage, styles.offlineMember]}
+                                />
+                                <View style={[styles.statusIndicator, styles.offlineStatus]} />
+                              </View>
+                              <Text style={[styles.memberName, styles.offlineName]}>
+                                {member.nickname || member.userId.displayName || member.userId.username}
+                                {member.userId._id === server?.owner && (
+                                  <Text style={styles.ownerTag}> • Owner</Text>
+                                )}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </>
+                    )}
+                    
+                    {/* Show message when no members found in both categories */}
+                    {onlineMembers.length === 0 && offlineMembers.length === 0 && (
+                      <View style={styles.emptyMembersContainer}>
+                        <Ionicons name="people" size={32} color={Colors.textMuted} />
+                        <Text style={styles.emptyMembersText}>
+                          No members found
+                        </Text>
+                        <Text style={styles.emptyMembersSubtext}>
+                          Try refreshing the page
+                        </Text>
+                        <Pressable 
+                          style={styles.refreshButton}
+                          onPress={() => {
+                            // Add a manual refetch function for members
+                            router.replace(`/server/${id}`);
+                          }}
+                        >
+                          <Text style={styles.refreshButtonText}>Refresh</Text>
+                        </Pressable>
                       </View>
-                    ))}
+                    )}
                   </>
                 )}
               </View>
@@ -651,6 +715,19 @@ export default function ServerScreen() {
           </View>
         </View>
       </View>
+
+      <ServerSettingsModal
+        visible={showServerSettings}
+        onClose={() => setShowServerSettings(false)}
+        server={server}
+        isOwner={server?.owner === user?._id}
+        onServerDeleted={() => {
+          router.replace('/(tabs)/home');
+        }}
+        onServerLeft={() => {
+          router.replace('/(tabs)/home');
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -968,5 +1045,41 @@ const styles = StyleSheet.create({
   },
   offlineName: {
     color: Colors.textMuted,
+  },
+  noMembersText: {
+    color: Colors.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 16,
+    fontStyle: 'italic',
+  },
+  emptyMembersContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  emptyMembersText: {
+    color: Colors.textMuted,
+    fontSize: 16,
+    marginTop: 8,
+  },
+  emptyMembersSubtext: {
+    color: Colors.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  refreshButton: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+  },
+  refreshButtonText: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

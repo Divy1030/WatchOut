@@ -248,26 +248,50 @@ export const userApi = {
 
 // Server API endpoints
 export const serverApi = {
-  // Get all servers for current user
+  // Create server
+  createServer: async (data: { name: string; description?: string; iconUrl?: string }) => {
+    const response = await api.post('/servers', data);
+    return response.data;
+  },
+
+  // Get user's servers
   getUserServers: async () => {
-    const response = await api.get('/servers');
+    const response = await api.get('/servers/me');
+    return response.data;
+  },
+
+  // Join server by invite code only
+  joinServerByCode: async (inviteCode: string) => {
+    console.log('API: Joining server with code:', inviteCode);
+    const response = await api.post(`/servers/join/${inviteCode}`);
+    console.log('API: Join server response:', response.data);
     return response.data;
   },
 
   // Get server details
   getServerDetails: async (serverId: string) => {
+    console.log('API: Getting server details for:', serverId);
     const response = await api.get(`/servers/${serverId}`);
+    console.log('API: Server details response:', response.data);
     return response.data;
   },
 
-  // Create new server
-  createServer: async (data: { name: string, description?: string, iconUrl?: string }) => {
-    const response = await api.post('/servers', data);
+  // Get server members
+  getServerMembers: async (serverId: string) => {
+    console.log('API: Getting server members for:', serverId);
+    const response = await api.get(`/servers/${serverId}/members`);
+    console.log('API: Server members response:', response.data);
+    return response.data;
+  },
+
+  // Create server invite
+  createInvite: async (serverId: string, data: { maxUses?: number; expiresIn?: number }) => {
+    const response = await api.post(`/servers/${serverId}/invites`, data);
     return response.data;
   },
 
   // Update server
-  updateServer: async (serverId: string, data: { name?: string, description?: string, iconUrl?: string }) => {
+  updateServer: async (serverId: string, data: any) => {
     const response = await api.patch(`/servers/${serverId}`, data);
     return response.data;
   },
@@ -278,59 +302,9 @@ export const serverApi = {
     return response.data;
   },
 
-  // Join server with invite code
-  joinServer: async (serverId: string, inviteCode: string) => {
-    const response = await api.post(`/servers/${serverId}/join/${inviteCode}`);
-    return response.data;
-  },
-
   // Leave server
   leaveServer: async (serverId: string) => {
     const response = await api.post(`/servers/${serverId}/leave`);
-    return response.data;
-  },
-
-  // Get server members
-  getServerMembers: async (serverId: string) => {
-    const response = await api.get(`/servers/${serverId}/members`);
-    return response.data;
-  },
-
-  // Create channel in server
-  createChannel: async (serverId: string, data: { 
-    name: string, 
-    type: 'text' | 'voice', 
-    topic?: string, 
-    isPrivate?: boolean,
-    allowedRoles?: string[],
-    allowedUsers?: string[]
-  }) => {
-    const response = await api.post(`/servers/${serverId}/channels`, data);
-    return response.data;
-  },
-
-  // Update channel
-  updateChannel: async (serverId: string, channelId: string, data: {
-    name?: string,
-    topic?: string,
-    position?: number,
-    isPrivate?: boolean,
-    allowedRoles?: string[],
-    allowedUsers?: string[]
-  }) => {
-    const response = await api.patch(`/servers/${serverId}/channels/${channelId}`, data);
-    return response.data;
-  },
-
-  // Delete channel
-  deleteChannel: async (serverId: string, channelId: string) => {
-    const response = await api.delete(`/servers/${serverId}/channels/${channelId}`);
-    return response.data;
-  },
-
-  // Create invite code
-  createInvite: async (serverId: string, data?: { maxUses?: number, expiresIn?: number }) => {
-    const response = await api.post(`/servers/${serverId}/invites`, data);
     return response.data;
   },
 };
@@ -343,13 +317,13 @@ export const messageApi = {
     if (cursor) params.append('cursor', cursor);
     params.append('limit', limit.toString());
     
-    const response = await api.get(`/messages/server/${serverId}/channel/${channelId}?${params}`);
+    const response = await api.get(`/messages/channels/${serverId}/${channelId}?${params}`);
     return response.data;
   },
 
   // Send message to channel
   sendChannelMessage: async (serverId: string, channelId: string, content: string, mentions: string[] = []) => {
-    const response = await api.post(`/messages/server/${serverId}/channel/${channelId}`, { content, mentions });
+    const response = await api.post(`/messages/channels/${serverId}/${channelId}`, { content, mentions });
     return response.data;
   },
 
@@ -383,13 +357,13 @@ export const messageApi = {
 
   // Add reaction to message
   addReaction: async (messageId: string, emoji: string) => {
-    const response = await api.post(`/messages/${messageId}/reactions`, { emoji });
+    const response = await api.post(`/messages/${messageId}/react`, { emoji });
     return response.data;
   },
 
   // Remove reaction from message
   removeReaction: async (messageId: string, emoji: string) => {
-    const response = await api.delete(`/messages/${messageId}/reactions/${emoji}`);
+    const response = await api.delete(`/messages/${messageId}/react/${emoji}`);
     return response.data;
   },
 
@@ -407,11 +381,11 @@ export const messageApi = {
 
   // Get pinned messages
   getPinnedMessages: async (serverId?: string, channelId?: string, userId?: string) => {
-    let endpoint = '/messages/pins';
+    let endpoint = '';
     if (serverId && channelId) {
-      endpoint = `/messages/server/${serverId}/channel/${channelId}/pins`;
+      endpoint = `/messages/pinned/channels/${serverId}/${channelId}`;
     } else if (userId) {
-      endpoint = `/messages/dm/${userId}/pins`;
+      endpoint = `/messages/pinned/dm/${userId}`;
     }
     
     const response = await api.get(endpoint);
