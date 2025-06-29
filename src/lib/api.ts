@@ -26,6 +26,10 @@ api.interceptors.request.use(
     
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      // Add debugging
+      console.log(`🔐 Token available for ${config.url}: ${token.substring(0, 15)}...`);
+    } else {
+      console.log(`⚠️ No token available for ${config.url}`);
     }
     
     return config;
@@ -41,17 +45,21 @@ api.interceptors.response.use(
     
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
+      console.log('🔄 Token expired, attempting refresh...');
       
       try {
         const refreshToken = await AsyncStorage.getItem('refreshToken');
         
         if (!refreshToken) {
+          console.log('❌ No refresh token available');
           throw new Error('No refresh token available');
         }
         
+        console.log('🔄 Refreshing token...');
         const response = await api.post('/users/refresh-token', { refreshToken });
         
         const { accessToken, refreshToken: newRefreshToken } = response.data.data;
+        console.log('✅ Token refreshed successfully');
         
         await AsyncStorage.setItem('accessToken', accessToken);
         await AsyncStorage.setItem('refreshToken', newRefreshToken);
@@ -59,6 +67,7 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return api(originalRequest);
       } catch (refreshError) {
+        console.log('❌ Token refresh failed:', refreshError);
         // If refresh token fails, clear storage and force logout
         await AsyncStorage.removeItem('accessToken');
         await AsyncStorage.removeItem('refreshToken');
@@ -357,13 +366,17 @@ export const messageApi = {
 
   // Add reaction to message
   addReaction: async (messageId: string, emoji: string) => {
+    console.log(`Adding reaction ${emoji} to message ${messageId}`);
     const response = await api.post(`/messages/${messageId}/react`, { emoji });
+    console.log('Reaction added response:', response.data);
     return response.data;
   },
 
   // Remove reaction from message
   removeReaction: async (messageId: string, emoji: string) => {
-    const response = await api.delete(`/messages/${messageId}/react/${emoji}`);
+    console.log(`Removing reaction ${emoji} from message ${messageId}`);
+    const response = await api.delete(`/messages/${messageId}/react/${encodeURIComponent(emoji)}`);
+    console.log('Reaction removed response:', response.data);
     return response.data;
   },
 

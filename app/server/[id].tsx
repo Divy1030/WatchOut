@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   FlatList,
   Image,
   Pressable,
@@ -37,34 +38,122 @@ import {
 import { useAuth } from '../../src/providers/AuthProvider';
 import { Message } from '../../src/types/message';
 
+const { width } = Dimensions.get('window');
+const isSmallDevice = width < 380;
+
 export default function ServerScreen() {
   const { id } = useLocalSearchParams();
   const { user } = useAuth();
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
-  const [showMembers, setShowMembers] = useState(false);
+  const [showMembers, setShowMembers] = useState(!isSmallDevice);
+  const [showChannels, setShowChannels] = useState(true);
   const [messageText, setMessageText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [showServerSettings, setShowServerSettings] = useState(false);
-  const typingTimeoutRef = useRef<number | null>(null);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | number | null>(null);
+  const flatListRef = useRef<FlatList>(null);
   
   // Fetch server details and members
   const { 
     data: serverData, 
     isLoading: isLoadingServer,
-    error: serverError 
+    error: serverError,
+    refetch: refetchServer
   } = useServerDetails(id as string);
   
   const { 
     data: membersData,
-    isLoading: isLoadingMembers 
+    isLoading: isLoadingMembers,
+    error: membersDataError,
+    refetch: refetchMembers
   } = useServerMembers(id as string);
   
-  // Extract server and members data properly
-  const server = serverData?.data;
-  const members = Array.isArray(membersData?.data) ? membersData.data : [];
+  // Extract server and members data safely
+  const server = serverData?.data?.server || serverData?.data;
   
-  // Fetch channel messages only when a channel is selected
+  // Fix members data processing
+  const members = useMemo(() => {
+    // Process members data safely
+    if (!membersData) return [];
+    
+    console.log('Processing members data:', JSON.stringify(membersData).substring(0, 100) + '...');
+    
+    const rawMembers = membersData.data?.members || [];
+    
+    // Ensure members is an array
+    if (!Array.isArray(rawMembers)) {
+      console.warn('Members data is not an array:', rawMembers);
+      setMembersError('Invalid members data structure');
+      return [];
+    }
+
+    // Map members data to ensure consistent structure
+    return rawMembers.map(member => {
+      // If member is already in the right format, return it
+      if (member.userId && (typeof member.userId === 'object' || typeof member.userId === 'string')) {
+        return member;
+      }
+      
+      // If member has direct user properties (_id, username, etc.), restructure it
+      if (member._id) {
+        return {
+          roles: member.roles || [],
+          _id: member._id,
+          userId: {
+            _id: member._id,
+            username: member.username || 'Unknown',
+            displayName: member.displayName,
+            avatarUrl: member.avatarUrl,
+            status: member.status || 'offline'
+          }
+        };
+      }
+      
+      // Fallback for unexpected format
+      return {
+        _id: `unknown-${Math.random().toString(36).substring(2, 10)}`,
+        userId: {
+          _id: `unknown-${Math.random().toString(36).substring(2, 10)}`,
+          username: 'Unknown User',
+          status: 'offline'
+        },
+        roles: ['@everyone']
+      };
+    });
+  }, [membersData]);
+  
+  // Debug members processing
+  useEffect(() => {
+    if (members.length > 0) {
+      console.log('Processed members:', members.length);
+      console.log('First member sample:', JSON.stringify(members[0]).substring(0, 100) + '...');
+    }
+  }, [members]);
+  
+  // Handle auth errors and retry mechanism
+  useEffect(() => {
+    if (membersDataError?.message?.includes('Unauthorized')) {
+      console.log('Authentication error detected, refreshing token...');
+      // Retry after a delay, but limit to 3 attempts
+      if (retryCount < 3) {
+        const timer = setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+          refetchMembers();
+        }, 1000);
+        return () => clearTimeout(timer);
+      } else {
+        setMembersError('Session expired. Please try logging in again.');
+      }
+    } else if (membersDataError) {
+      console.error('Members error:', membersDataError);
+      setMembersError('Failed to load members');
+    }
+  }, [membersDataError, retryCount]);
+  
+  // Update the channelMessages hook usage to fetch messages immediately when a channel is selected
   const { 
     data: messagesData, 
     isLoading: isLoadingMessages,
@@ -90,12 +179,38 @@ export default function ServerScreen() {
     }
   }, [server, selectedChannel]);
   
-  // Update messages when data changes
+  // Improve the useEffect for handling messages data
   useEffect(() => {
-    if (messagesData?.data) {
+    if (messagesData?.data && selectedChannel) {
+      console.log(`Received ${messagesData.data.length} messages for channel ${selectedChannel}`);
+      
+      // If we have messagesData, set it immediately
       setMessages(messagesData.data);
+      
+      // Scroll to bottom (top in inverted list) after messages load
+      setTimeout(() => {
+        if (flatListRef.current && messagesData.data.length > 0) {
+          flatListRef.current.scrollToOffset({ offset: 0, animated: false });
+        }
+      }, 100);
     }
-  }, [messagesData]);
+  }, [messagesData, selectedChannel]);
+  
+  // When changing channels, update the useEffect to fetch messages immediately
+  useEffect(() => {
+    if (selectedChannel && id) {
+      // Clear previous messages when switching channels
+      setMessages([]);
+      
+      // Join the channel socket room
+      joinChannel(id as string, selectedChannel);
+      
+      // Explicitly trigger a fetch of messages for the new channel
+      refetchMessages();
+      
+      console.log(`Switched to channel ${selectedChannel}, fetching messages...`);
+    }
+  }, [selectedChannel, id]);
   
   // Initialize socket connection and join channels
   useEffect(() => {
@@ -106,16 +221,19 @@ export default function ServerScreen() {
         // Join server room
         if (id) {
           joinServer(id as string);
+          console.log(`Joined server room: server:${id}`);
         }
         
         // Join channel room if channel is selected
         if (selectedChannel && id) {
           joinChannel(id as string, selectedChannel);
+          console.log(`Joined channel room: channel:${selectedChannel}`);
         }
         
         // Listen for new messages
         onNewMessage((newMessage: Message) => {
           if (newMessage.channelId === selectedChannel && newMessage.serverId === id) {
+            console.log('New message received:', newMessage.content.substring(0, 20));
             setMessages(prev => [newMessage, ...prev]);
           }
         });
@@ -177,14 +295,31 @@ export default function ServerScreen() {
   
   // Handle channel selection
   const handleChannelSelect = (channelId: string) => {
+    // Select the new channel
     setSelectedChannel(channelId);
-    setMessages([]); // Clear messages when switching channels
-    setTypingUsers([]); // Clear typing users
+    
+    // Clear existing messages and typing users
+    setMessages([]); 
+    setTypingUsers([]);
+    
+    // Show loading state immediately
+    // (optional) You can add a local loading state here if needed
     
     // Join the new channel
     if (id) {
       joinChannel(id as string, channelId);
+      console.log(`Switched to channel: ${channelId}`);
     }
+    
+    // On small devices, hide channels panel after selection
+    if (isSmallDevice) {
+      setShowChannels(false);
+    }
+    
+    // Fetch messages immediately with a minimal delay
+    setTimeout(() => {
+      refetchMessages();
+    }, 50); // Small timeout to ensure the channel is set first
   };
   
   // Handle typing indicator
@@ -228,8 +363,20 @@ export default function ServerScreen() {
       content: messageText.trim(),
       mentions: [] // Add mentions functionality later
     }, {
-      onSuccess: () => {
+      onSuccess: (data) => {
         setMessageText('');
+        
+        // Add the new message to the list immediately for better UX
+        // Use the returned message from the API if available
+        const newMessage = data?.data;
+        if (newMessage) {
+          setMessages(prev => [newMessage, ...prev]);
+        }
+        
+        // Ensure we're at the top of the list (since it's inverted)
+        setTimeout(() => {
+          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        }, 50);
         
         // Clear typing indicator
         if (typingTimeoutRef.current) {
@@ -251,6 +398,13 @@ export default function ServerScreen() {
     });
   };
   
+  // Handle members refresh
+  const handleRefreshMembers = () => {
+    setMembersError(null);
+    setRetryCount(0);
+    refetchMembers();
+  };
+  
   // Clear typing timeout on unmount
   useEffect(() => {
     return () => {
@@ -265,19 +419,18 @@ export default function ServerScreen() {
   const voiceChannels = server?.channels?.filter((c: any) => c.type === 'voice') || [];
   
   // Group members by status - with proper safety checks
-  const onlineMembers = members.filter((m: any) => 
-    m?.userId?.status === 'online' || 
-    m?.userId?.status === 'idle' || 
-    m?.userId?.status === 'dnd'
-  );
+  const onlineMembers = members.filter((m: any) => {
+    if (!m?.userId) return false;
+    const status = m.userId.status;
+    return status === 'online' || status === 'idle' || status === 'dnd';
+  });
 
-  const offlineMembers = members.filter((m: any) => 
-    m?.userId?.status === 'offline' || 
-    m?.userId?.status === 'invisible' ||
-    !m?.userId?.status
-  );
+  const offlineMembers = members.filter((m: any) => {
+    if (!m?.userId) return false;
+    const status = m.userId.status;
+    return !status || status === 'offline' || status === 'invisible';
+  });
 
-  
   // Get selected channel name
   const selectedChannelName = server?.channels?.find((c: any) => c._id === selectedChannel)?.name || 'general';
   
@@ -285,15 +438,17 @@ export default function ServerScreen() {
   useEffect(() => {
     console.log('🔍 Server Screen Debug Info:');
     console.log('- Server ID:', id);
-    console.log('- Server Data:', serverData);
-    console.log('- Server:', server);
-    console.log('- Members Data:', membersData);
     console.log('- Members Array:', members);
     console.log('- Members Length:', members?.length);
     console.log('- Is Loading Server:', isLoadingServer);
     console.log('- Is Loading Members:', isLoadingMembers);
     console.log('- Server Error:', serverError?.message);
-  }, [serverData, membersData, server, members, isLoadingServer, isLoadingMembers, serverError, id]);
+    console.log('- Members Error:', membersDataError?.message);
+    
+    if (membersData) {
+      console.log('- Raw Members Data:', JSON.stringify(membersData).substring(0, 200));
+    }
+  }, [serverData, membersData, server, members, isLoadingServer, isLoadingMembers, serverError, membersDataError, id]);
   
   if (isLoadingServer) {
     return (
@@ -328,392 +483,403 @@ export default function ServerScreen() {
   
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.mainLayout}>
-        {/* Left sidebar - Channels */}
-        <View style={styles.channelsArea}>
-          <View style={styles.serverHeader}>
-            <Pressable 
-              style={styles.serverHeaderContent}
-              onPress={() => setShowServerSettings(true)}
-            >
-              <Text style={styles.serverName} numberOfLines={1}>
-                {server.name || 'Loading...'}
+      {/* Server header - always visible */}
+      <View style={styles.serverHeader}>
+        <Pressable 
+          style={styles.serverHeaderContent}
+          onPress={() => setShowServerSettings(true)}
+        >
+          {server.iconUrl ? (
+            <Image 
+              source={{ uri: server.iconUrl }} 
+              style={styles.serverIcon} 
+            />
+          ) : (
+            <View style={styles.serverIconPlaceholder}>
+              <Text style={styles.serverIconText}>
+                {server.name?.charAt(0).toUpperCase()}
               </Text>
-              <Ionicons name="chevron-down" size={16} color={Colors.text} />
+            </View>
+          )}
+          <Text style={styles.serverName} numberOfLines={1}>
+            {server.name || 'Loading...'}
+          </Text>
+          <Ionicons name="chevron-down" size={16} color={Colors.text} />
+        </Pressable>
+        
+        <View style={styles.headerActions}>
+          {isSmallDevice && (
+            <Pressable 
+              style={styles.headerAction}
+              onPress={() => setShowChannels(!showChannels)}
+            >
+              <Ionicons 
+                name={showChannels ? "menu" : "chatbubble-outline"} 
+                size={22} 
+                color={Colors.text} 
+              />
             </Pressable>
-          </View>
-          
-          <ScrollView style={styles.channelsList}>
-            {/* Text channels */}
-            <View style={styles.categoryContainer}>
-              <View style={styles.categoryHeader}>
-                <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
-                <Text style={styles.categoryTitle}>TEXT CHANNELS</Text>
-                <Pressable style={styles.addChannelButton}>
-                  <Ionicons name="add" size={16} color={Colors.textMuted} />
-                </Pressable>
+          )}
+          {isSmallDevice && (
+            <Pressable 
+              style={styles.headerAction}
+              onPress={() => setShowMembers(!showMembers)}
+            >
+              <Ionicons name="people" size={22} color={Colors.text} />
+              {members.length > 0 && (
+                <View style={styles.memberCountBadge}>
+                  <Text style={styles.memberCountText}>{members.length}</Text>
+                </View>
+              )}
+            </Pressable>
+          )}
+        </View>
+      </View>
+      
+      <View style={styles.contentContainer}>
+        {/* Left sidebar - Channels */}
+        {(!isSmallDevice || showChannels) && (
+          <View style={styles.channelsArea}>
+            <ScrollView style={styles.channelsList} showsVerticalScrollIndicator={false}>
+              {/* Text channels */}
+              {textChannels.length > 0 && (
+                <View style={styles.categoryContainer}>
+                  <View style={styles.categoryHeader}>
+                    <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
+                    <Text style={styles.categoryTitle}>TEXT CHANNELS</Text>
+                    {server.userRoles?.includes('owner') && (
+                      <Pressable style={styles.addChannelButton}>
+                        <Ionicons name="add" size={16} color={Colors.textMuted} />
+                      </Pressable>
+                    )}
+                  </View>
+                  
+                  {textChannels.map((channel: any) => (
+                    <Pressable
+                      key={channel._id}
+                      style={[
+                        styles.channelItem,
+                        selectedChannel === channel._id && styles.selectedChannel
+                      ]}
+                      onPress={() => handleChannelSelect(channel._id)}
+                    >
+                      <Ionicons 
+                        name="chatbubble-outline" 
+                        size={20} 
+                        color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
+                      />
+                      <Text 
+                        style={[
+                          styles.channelName,
+                          selectedChannel === channel._id && styles.selectedChannelName
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {channel.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+
+              {/* Voice channels */}
+              {voiceChannels.length > 0 && (
+                <View style={styles.categoryContainer}>
+                  <View style={styles.categoryHeader}>
+                    <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
+                    <Text style={styles.categoryTitle}>VOICE CHANNELS</Text>
+                    {server.userRoles?.includes('owner') && (
+                      <Pressable style={styles.addChannelButton}>
+                        <Ionicons name="add" size={16} color={Colors.textMuted} />
+                      </Pressable>
+                    )}
+                  </View>
+                  
+                  {voiceChannels.map((channel: any) => (
+                    <Pressable
+                      key={channel._id}
+                      style={[
+                        styles.channelItem,
+                        selectedChannel === channel._id && styles.selectedChannel
+                      ]}
+                      onPress={() => handleChannelSelect(channel._id)}
+                    >
+                      <Ionicons 
+                        name="volume-medium-outline" 
+                        size={20} 
+                        color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
+                      />
+                      <Text 
+                        style={[
+                          styles.channelName,
+                          selectedChannel === channel._id && styles.selectedChannelName
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {channel.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+            
+            {/* User info at bottom */}
+            <View style={styles.userInfo}>
+              <Image
+                source={{ 
+                  uri: user?.avatarUrl || 
+                  `https://via.placeholder.com/32/5865f2/ffffff?text=${user?.username?.charAt(0).toUpperCase()}` 
+                }}
+                style={styles.userAvatar}
+              />
+              <View style={styles.userDetails}>
+                <Text style={styles.userDisplayName} numberOfLines={1}>
+                  {user?.displayName || user?.username}
+                </Text>
+                <Text style={styles.userStatus}>
+                  {user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Online'}
+                </Text>
               </View>
               
-              {textChannels.map((channel: any) => (
-                <Pressable
-                  key={channel._id}
-                  style={[
-                    styles.channelItem,
-                    selectedChannel === channel._id && styles.selectedChannel
-                  ]}
-                  onPress={() => handleChannelSelect(channel._id)}
-                >
-                  <Ionicons 
-                    name="chatbubble-outline" 
-                    size={20} 
-                    color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
-                  />
-                  <Text 
-                    style={[
-                      styles.channelName,
-                      selectedChannel === channel._id && styles.selectedChannelName
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {channel.name}
-                  </Text>
+              <View style={styles.userActions}>
+                <Pressable style={styles.userAction}>
+                  <Ionicons name="settings" size={20} color={Colors.text} />
                 </Pressable>
-              ))}
-            </View>
-            
-            {/* Voice channels */}
-            {voiceChannels.length > 0 && (
-              <View style={styles.categoryContainer}>
-                <View style={styles.categoryHeader}>
-                  <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
-                  <Text style={styles.categoryTitle}>VOICE CHANNELS</Text>
-                  <Pressable style={styles.addChannelButton}>
-                    <Ionicons name="add" size={16} color={Colors.textMuted} />
-                  </Pressable>
-                </View>
-                
-                {voiceChannels.map((channel: any) => (
-                  <Pressable
-                    key={channel._id}
-                    style={[
-                      styles.channelItem,
-                      selectedChannel === channel._id && styles.selectedChannel
-                    ]}
-                    onPress={() => handleChannelSelect(channel._id)}
-                  >
-                    <Ionicons 
-                      name="volume-medium-outline" 
-                      size={20} 
-                      color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
-                    />
-                    <Text 
-                      style={[
-                        styles.channelName,
-                        selectedChannel === channel._id && styles.selectedChannelName
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {channel.name}
-                    </Text>
-                  </Pressable>
-                ))}
               </View>
-            )}
-          </ScrollView>
-          
-          {/* User info at bottom */}
-          <View style={styles.userInfo}>
-            <Image
-              source={{ 
-                uri: user?.avatarUrl || 
-                `https://via.placeholder.com/32/5865f2/ffffff?text=${user?.username?.charAt(0).toUpperCase()}` 
-              }}
-              style={styles.userAvatar}
-            />
-            <View style={styles.userDetails}>
-              <Text style={styles.userDisplayName} numberOfLines={1}>
-                {user?.displayName || user?.username}
-              </Text>
-              <Text style={styles.userStatus}>
-                {user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Online'}
-              </Text>
-            </View>
-            
-            <View style={styles.userActions}>
-              <Pressable style={styles.userAction}>
-                <Ionicons name="mic" size={20} color={Colors.text} />
-              </Pressable>
-              <Pressable style={styles.userAction}>
-                <Ionicons name="headset" size={20} color={Colors.text} />
-              </Pressable>
-              <Pressable style={styles.userAction}>
-                <Ionicons name="settings" size={20} color={Colors.text} />
-              </Pressable>
             </View>
           </View>
-        </View>
+        )}
 
-        {/* Right - Chat area */}
+        {/* Center - Chat area - Replace KeyboardAvoidingView with View */}
         <View style={styles.chatArea}>
-          <View style={styles.chatHeader}>
-            <Pressable 
-              style={styles.backButton} 
-              onPress={() => router.back()}
-            >
-              <Ionicons name="chevron-back" size={24} color={Colors.text} />
-            </Pressable>
-            <Ionicons 
-              name="chatbubble-outline" 
-              size={24} 
-              color={Colors.textMuted} 
-            />
-            <Text style={styles.chatChannelName}>#{selectedChannelName}</Text>
-            <View style={styles.chatActions}>
-              <Pressable style={styles.chatAction}>
+          {/* Channel header */}
+          <View style={styles.channelHeader}>
+            <View style={styles.channelInfo}>
+              <Ionicons name="chatbubble-outline" size={20} color={Colors.textMuted} />
+              <Text style={styles.channelName}>#{selectedChannelName}</Text>
+            </View>
+            
+            <View style={styles.channelActions}>
+              <Pressable style={styles.channelAction}>
                 <Ionicons name="notifications" size={20} color={Colors.textMuted} />
               </Pressable>
-              <Pressable style={styles.chatAction}>
+              <Pressable style={styles.channelAction}>
                 <Ionicons name="pin" size={20} color={Colors.textMuted} />
               </Pressable>
-              <Pressable 
-                style={styles.chatAction}
-                onPress={() => setShowMembers(!showMembers)}
-              >
-                <Ionicons name="people" size={20} color={Colors.textMuted} />
-              </Pressable>
-              <Pressable style={styles.chatAction}>
+              <Pressable style={styles.channelAction}>
                 <Ionicons name="search" size={20} color={Colors.textMuted} />
               </Pressable>
+              {!isSmallDevice && (
+                <Pressable 
+                  style={styles.channelAction} 
+                  onPress={() => setShowMembers(!showMembers)}
+                >
+                  <Ionicons name="people" size={20} color={Colors.textMuted} />
+                  {members.length > 0 && (
+                    <View style={styles.memberCountSmallBadge}>
+                      <Text style={styles.memberCountSmallText}>{members.length}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              )}
             </View>
           </View>
           
-          <View style={styles.chatContentContainer}>
-            <View style={[styles.messagesContainer, showMembers && styles.withMembers]}>
-              {/* Welcome message for empty channels or loading */}
-              {!selectedChannel ? (
-                <View style={styles.welcomeSection}>
-                  <Text style={styles.welcomeTitle}>Welcome to {server.name}!</Text>
-                  <Text style={styles.welcomeText}>
-                    Select a channel to start chatting.
-                  </Text>
-                </View>
-              ) : isLoadingMessages ? (
-                <ActivityIndicator size="large" color={Colors.primary} style={styles.loader} />
-              ) : messagesError ? (
-                <View style={styles.welcomeSection}>
-                  <Text style={styles.errorText}>Failed to load messages</Text>
-                  <Pressable style={styles.retryButton} onPress={() => refetchMessages()}>
-                    <Text style={styles.retryText}>Retry</Text>
-                  </Pressable>
-                </View>
-              ) : messages.length === 0 ? (
-                <View style={styles.welcomeSection}>
-                  <Text style={styles.welcomeTitle}>Welcome to #{selectedChannelName}!</Text>
-                  <Text style={styles.welcomeText}>
-                    This is the start of the #{selectedChannelName} channel.
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  {/* Messages */}
-                  <FlatList
-                    data={messages}
-                    renderItem={({ item }) => (
-                      <ChatMessage 
-                        message={item}
-                        isMine={item.sender._id === user?._id}
-                      />
-                    )}
-                    keyExtractor={item => item._id}
-                    inverted
-                    contentContainerStyle={styles.messagesContent}
-                    showsVerticalScrollIndicator={false}
-                  />
-                  
-                  {/* Typing indicator */}
-                  {typingUsers.length > 0 && (
-                    <View style={styles.typingContainer}>
-                      <Text style={styles.typingText}>
-                        {typingUsers.length === 1 
-                          ? `${typingUsers[0]} is typing...`
-                          : typingUsers.length === 2 
-                          ? `${typingUsers[0]} and ${typingUsers[1]} are typing...`
-                          : `${typingUsers.length} people are typing...`
-                        }
-                      </Text>
-                    </View>
-                  )}
-                </>
-              )}
-              
-              {/* Message Input */}
-              {selectedChannel && (
-                <View style={styles.inputContainer}>
-                  <Pressable style={styles.inputButton}>
-                    <Ionicons name="add" size={24} color={Colors.textMuted} />
-                  </Pressable>
-                  <TextInput
-                    style={styles.input}
-                    placeholder={`Message #${selectedChannelName}`}
-                    placeholderTextColor={Colors.textMuted}
-                    value={messageText}
-                    onChangeText={(text) => {
-                      setMessageText(text);
-                      handleTyping();
-                    }}
-                    multiline
-                    maxLength={2000}
-                  />
-                  <Pressable style={styles.inputButton}>
-                    <Ionicons name="happy" size={24} color={Colors.textMuted} />
-                  </Pressable>
-                  {messageText.trim() ? (
-                    <Pressable 
-                      style={[
-                        styles.sendButton,
-                        sendMessageMutation.isPending && styles.sendButtonDisabled
-                      ]} 
-                      onPress={handleSendMessage}
-                      disabled={sendMessageMutation.isPending}
-                    >
-                      {sendMessageMutation.isPending ? (
-                        <ActivityIndicator size="small" color={Colors.text} />
-                      ) : (
-                        <Ionicons name="send" size={20} color={Colors.text} />
-                      )}
-                    </Pressable>
-                  ) : (
-                    <Pressable style={styles.inputButton}>
-                      <Ionicons name="mic" size={24} color={Colors.textMuted} />
-                    </Pressable>
-                  )}
-                </View>
-              )}
-            </View>
-            
-            {/* Members sidebar */}
-            {showMembers && (
-              <View style={styles.membersArea}>
-                <Text style={styles.membersHeader}>
-                  MEMBERS - {isLoadingMembers ? '...' : members.length}
+          {/* Messages area */}
+          <View style={styles.messagesArea}>
+            {!selectedChannel ? (
+              <View style={styles.welcomeSection}>
+                <Text style={styles.welcomeTitle}>Welcome to {server.name}!</Text>
+                <Text style={styles.welcomeText}>
+                  Select a channel to start chatting.
                 </Text>
-                
-                {isLoadingMembers ? (
-                  <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: 16 }} />
-                ) : members.length === 0 ? (
-                  <Text style={styles.noMembersText}>No members found</Text>
-                ) : (
-                  <>
-                    {/* Online members */}
-                    {onlineMembers.length > 0 && (
-                      <>
-                        <Text style={styles.memberCategory}>
-                          ONLINE - {onlineMembers.length}
-                        </Text>
-                        {onlineMembers.map((member: any) => {
-                          if (!member?.userId) {
-                            console.warn('Invalid member data:', member);
-                            return null;
-                          }
-                          
-                          return (
-                            <View key={member.userId._id} style={styles.memberItem}>
-                              <View style={styles.memberAvatar}>
-                                <Image
-                                  source={{ 
-                                    uri: member.userId.avatarUrl || 
-                                    `https://via.placeholder.com/32/5865f2/ffffff?text=${member.userId.username?.charAt(0).toUpperCase()}` 
-                                  }}
-                                  style={styles.memberAvatarImage}
-                                />
-                                <View 
-                                  style={[
-                                    styles.statusIndicator, 
-                                    { 
-                                      backgroundColor: 
-                                        member.userId.status === 'online' ? Colors.secondary :
-                                        member.userId.status === 'idle' ? Colors.warning :
-                                        member.userId.status === 'dnd' ? Colors.error :
-                                        Colors.textMuted 
-                                    }
-                                  ]} 
-                                />
-                              </View>
-                              <Text style={styles.memberName}>
-                                {member.nickname || member.userId.displayName || member.userId.username}
-                                {member.userId._id === server?.owner && (
-                                  <Text style={styles.ownerTag}> • Owner</Text>
-                                )}
-                              </Text>
-                            </View>
-                          );
-                        })}
-                      </>
-                    )}
-                    
-                    {/* Offline members */}
-                    {offlineMembers.length > 0 && (
-                      <>
-                        <Text style={styles.memberCategory}>
-                          OFFLINE - {offlineMembers.length}
-                        </Text>
-                        {offlineMembers.map((member: any) => {
-                          if (!member?.userId) {
-                            console.warn('Invalid member data:', member);
-                            return null;
-                          }
-                          
-                          return (
-                            <View key={member.userId._id} style={styles.memberItem}>
-                              <View style={styles.memberAvatar}>
-                                <Image
-                                  source={{ 
-                                    uri: member.userId.avatarUrl || 
-                                    `https://via.placeholder.com/32/5865f2/ffffff?text=${member.userId.username?.charAt(0).toUpperCase()}` 
-                                  }}
-                                  style={[styles.memberAvatarImage, styles.offlineMember]}
-                                />
-                                <View style={[styles.statusIndicator, styles.offlineStatus]} />
-                              </View>
-                              <Text style={[styles.memberName, styles.offlineName]}>
-                                {member.nickname || member.userId.displayName || member.userId.username}
-                                {member.userId._id === server?.owner && (
-                                  <Text style={styles.ownerTag}> • Owner</Text>
-                                )}
-                              </Text>
-                            </View>
-                          );
-                        })}
-                      </>
-                    )}
-                    
-                    {/* Show message when no members found in both categories */}
-                    {onlineMembers.length === 0 && offlineMembers.length === 0 && (
-                      <View style={styles.emptyMembersContainer}>
-                        <Ionicons name="people" size={32} color={Colors.textMuted} />
-                        <Text style={styles.emptyMembersText}>
-                          No members found
-                        </Text>
-                        <Text style={styles.emptyMembersSubtext}>
-                          Try refreshing the page
-                        </Text>
-                        <Pressable 
-                          style={styles.refreshButton}
-                          onPress={() => {
-                            // Add a manual refetch function for members
-                            router.replace(`/server/${id}`);
-                          }}
-                        >
-                          <Text style={styles.refreshButtonText}>Refresh</Text>
-                        </Pressable>
-                      </View>
-                    )}
-                  </>
+              </View>
+            ) : isLoadingMessages ? (
+              <ActivityIndicator size="large" color={Colors.primary} style={styles.loader} />
+            ) : messagesError ? (
+              <View style={styles.welcomeSection}>
+                <Text style={styles.errorText}>Failed to load messages</Text>
+                <Pressable style={styles.retryButton} onPress={() => refetchMessages()}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : messages.length === 0 ? (
+              <View style={styles.welcomeSection}>
+                <Text style={styles.welcomeTitle}>Welcome to #{selectedChannelName}!</Text>
+                <Text style={styles.welcomeText}>
+                  This is the start of the #{selectedChannelName} channel.
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                ref={flatListRef}
+                data={messages}
+                renderItem={({ item }) => (
+                  <ChatMessage 
+                    message={item}
+                    isMine={item.sender._id === user?._id}
+                  />
                 )}
+                keyExtractor={item => item._id}
+                inverted
+                contentContainerStyle={styles.messagesContent}
+                showsVerticalScrollIndicator={false}
+              />
+            )}
+            
+            {/* Typing indicator */}
+            {typingUsers.length > 0 && (
+              <View style={styles.typingContainer}>
+                <Text style={styles.typingText}>
+                  {typingUsers.length === 1 
+                    ? `${typingUsers[0]} is typing...`
+                    : typingUsers.length === 2 
+                    ? `${typingUsers[0]} and ${typingUsers[1]} are typing...`
+                    : `${typingUsers.length} people are typing...`
+                  }
+                </Text>
               </View>
             )}
           </View>
+          
+          {/* Message Input */}
+          {selectedChannel && (
+            <View style={styles.inputContainer}>
+              <Pressable style={styles.inputButton}>
+                <Ionicons name="add" size={24} color={Colors.textMuted} />
+              </Pressable>
+              <TextInput
+                style={styles.input}
+                placeholder={`Message #${selectedChannelName}`}
+                placeholderTextColor={Colors.textMuted}
+                value={messageText}
+                onChangeText={(text) => {
+                  setMessageText(text);
+                  handleTyping();
+                }}
+                multiline
+                maxLength={2000}
+              />
+              {messageText.trim() ? (
+                <Pressable 
+                  style={[
+                    styles.sendButton,
+                    sendMessageMutation.isPending && styles.sendButtonDisabled
+                  ]} 
+                  onPress={handleSendMessage}
+                  disabled={sendMessageMutation.isPending}
+                >
+                  {sendMessageMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.text} />
+                  ) : (
+                    <Ionicons name="send" size={20} color={Colors.text} />
+                  )}
+                </Pressable>
+              ) : (
+                <Pressable style={styles.inputButton}>
+                  <Ionicons name="mic" size={24} color={Colors.textMuted} />
+                </Pressable>
+              )}
+            </View>
+          )}
         </View>
+        
+        {/* Right sidebar - Members */}
+        {showMembers && (
+          <View style={[
+            styles.membersArea,
+            isSmallDevice && styles.membersAreaMobile
+          ]}>
+            <View style={styles.membersAreaHeader}>
+              <Text style={styles.membersHeader}>
+                MEMBERS - {isLoadingMembers ? '...' : members.length}
+              </Text>
+              <Pressable onPress={handleRefreshMembers} style={styles.refreshIcon}>
+                <Ionicons name="refresh" size={16} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            
+            {isLoadingMembers ? (
+              <View style={styles.loadingMembersContainer}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={styles.loadingMembersText}>Loading members...</Text>
+              </View>
+            ) : membersError ? (
+              <View style={styles.emptyMembersContainer}>
+                <Ionicons name="alert-circle" size={32} color={Colors.error} />
+                <Text style={styles.membersErrorText}>{membersError}</Text>
+                <Pressable 
+                  style={styles.refreshButton}
+                  onPress={handleRefreshMembers}
+                >
+                  <Text style={styles.refreshButtonText}>Try Again</Text>
+                </Pressable>
+              </View>
+            ) : members.length === 0 ? (
+              <View style={styles.emptyMembersContainer}>
+                <Ionicons name="people" size={32} color={Colors.textMuted} />
+                <Text style={styles.emptyMembersText}>
+                  No members found
+                </Text>
+                <Text style={styles.emptyMembersSubtext}>
+                  There might be an issue loading the server members
+                </Text>
+                <Pressable 
+                  style={styles.refreshButton}
+                  onPress={handleRefreshMembers}
+                >
+                  <Text style={styles.refreshButtonText}>Refresh</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <ScrollView style={styles.membersList} showsVerticalScrollIndicator={false}>
+                {/* Online members */}
+                {onlineMembers.length > 0 && (
+                  <>
+                    <Text style={styles.memberCategory}>
+                      ONLINE - {onlineMembers.length}
+                    </Text>
+                    {onlineMembers.map((member: any) => (
+                      <MemberItem 
+                        key={member.userId._id || member._id}
+                        member={member}
+                        isOwner={(member.userId._id || member.userId) === server?.owner}
+                        isOnline={true}
+                      />
+                    ))}
+                  </>
+                )}
+                
+                {/* Offline members */}
+                {offlineMembers.length > 0 && (
+                  <>
+                    <Text style={styles.memberCategory}>
+                      OFFLINE - {offlineMembers.length}
+                    </Text>
+                    {offlineMembers.map((member: any) => (
+                      <MemberItem 
+                        key={member.userId._id || member._id}
+                        member={member}
+                        isOwner={(member.userId._id || member.userId) === server?.owner}
+                        isOnline={false}
+                      />
+                    ))}
+                  </>
+                )}
+              </ScrollView>
+            )}
+            
+            {isSmallDevice && (
+              <Pressable 
+                style={styles.closeMembersButton}
+                onPress={() => setShowMembers(false)}
+              >
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </Pressable>
+            )}
+          </View>
+        )}
       </View>
 
       <ServerSettingsModal
@@ -731,6 +897,59 @@ export default function ServerScreen() {
     </SafeAreaView>
   );
 }
+
+// Updated MemberItem component with better error handling
+const MemberItem = ({ member, isOwner, isOnline }: { 
+  member: any, 
+  isOwner: boolean,
+  isOnline: boolean
+}) => {
+  // Handle different data formats - userId can be either object or string
+  const userId = member.userId || {};
+  const isUserIdObject = typeof userId === 'object';
+  
+  // Get safe values with fallbacks
+  const id = isUserIdObject ? userId._id : userId;
+  const username = isUserIdObject ? (userId.username || 'Unknown') : `User_${String(userId).substring(0, 5)}`;
+  const displayName = member.nickname || (isUserIdObject ? (userId.displayName || username) : username);
+  const avatarUrl = isUserIdObject ? userId.avatarUrl : null;
+  const status = isUserIdObject ? userId.status : 'offline';
+  
+  return (
+    <View style={styles.memberItem}>
+      <View style={styles.memberAvatar}>
+        <Image
+          source={{ 
+            uri: avatarUrl || 
+            `https://via.placeholder.com/32/5865f2/ffffff?text=${username.charAt(0).toUpperCase()}` 
+          }}
+          style={[
+            styles.memberAvatarImage,
+            !isOnline && styles.offlineMember
+          ]}
+        />
+        <View 
+          style={[
+            styles.statusIndicator, 
+            !isOnline ? 
+              styles.offlineStatus :
+              { 
+                backgroundColor: 
+                  status === 'online' ? Colors.secondary :
+                  status === 'idle' ? Colors.warning :
+                  status === 'dnd' ? Colors.error :
+                  Colors.textMuted 
+              }
+          ]} 
+        />
+      </View>
+      <Text style={[styles.memberName, !isOnline && styles.offlineName]}>
+        {displayName}
+        {isOwner && <Text style={styles.ownerTag}> • Owner</Text>}
+      </Text>
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -765,23 +984,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  mainLayout: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  channelsArea: {
-    width: 240,
-    backgroundColor: Colors.surfaceLight,
-  },
+  // Server header
   serverHeader: {
-    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    backgroundColor: Colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.surface,
+    borderBottomColor: Colors.border,
   },
   serverHeaderContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    flex: 1,
+  },
+  serverIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    marginRight: 8,
+  },
+  serverIconPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  serverIconText: {
+    color: Colors.text,
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   serverName: {
     fontSize: 16,
@@ -790,9 +1026,67 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerAction: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    marginLeft: 4,
+    position: 'relative',
+  },
+  memberCountBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: Colors.error,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  memberCountText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  memberCountSmallBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: Colors.error,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  memberCountSmallText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: 'bold',
+  },
+  // Main content container
+  contentContainer: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  // Channels area
+  channelsArea: {
+    width: isSmallDevice ? '100%' : 200,
+    backgroundColor: Colors.surfaceLight,
+    borderRightWidth: 1,
+    borderRightColor: Colors.border,
+    flexDirection: 'column',
+  },
   channelsList: {
     flex: 1,
-    paddingHorizontal: 8,
+    padding: 8,
   },
   categoryContainer: {
     marginBottom: 16,
@@ -816,10 +1110,10 @@ const styles = StyleSheet.create({
   channelItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 4,
-    marginBottom: 2,
+    marginVertical: 1,
   },
   selectedChannel: {
     backgroundColor: Colors.surface,
@@ -832,12 +1126,15 @@ const styles = StyleSheet.create({
   },
   selectedChannelName: {
     color: Colors.text,
+    fontWeight: '500',
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
+    padding: 12,
     backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
   userAvatar: {
     width: 32,
@@ -867,50 +1164,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 4,
   },
+  // Chat area
   chatArea: {
     flex: 1,
     backgroundColor: Colors.background,
+    flexDirection: 'column',
   },
-  chatHeader: {
+  channelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.surface,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.surfaceLight,
   },
-  backButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
+  channelInfo: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 8,
   },
-  chatChannelName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: Colors.text,
-    marginLeft: 8,
-    flex: 1,
-  },
-  chatActions: {
+  channelActions: {
     flexDirection: 'row',
   },
-  chatAction: {
+  channelAction: {
     width: 32,
     height: 32,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
+    position: 'relative',
   },
-  chatContentContainer: {
+  messagesArea: {
     flex: 1,
-    flexDirection: 'row',
-  },
-  messagesContainer: {
-    flex: 1,
-  },
-  withMembers: {
-    flex: 0.7,
   },
   welcomeSection: {
     padding: 16,
@@ -923,6 +1208,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: Colors.text,
     marginBottom: 8,
+    textAlign: 'center',
   },
   welcomeText: {
     fontSize: 16,
@@ -951,14 +1237,14 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: Colors.background,
+    padding: 12,
+    backgroundColor: Colors.surfaceLight,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: Colors.border,
   },
   inputButton: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 4,
@@ -966,48 +1252,77 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     backgroundColor: Colors.surface,
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 20,
+    padding: 10,
     color: Colors.text,
     fontSize: 16,
-    maxHeight: 120,
-    minHeight: 40,
+    maxHeight: 100,
+    minHeight: 36,
   },
   sendButton: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.primary,
-    borderRadius: 20,
+    borderRadius: 18,
     marginLeft: 8,
   },
   sendButtonDisabled: {
     opacity: 0.6,
   },
+  // Members area
   membersArea: {
-    width: 200,
+    width: isSmallDevice ? '60%' : 200,
     backgroundColor: Colors.surfaceLight,
-    padding: 16,
     borderLeftWidth: 1,
-    borderLeftColor: Colors.surface,
+    borderLeftColor: Colors.border,
+  },
+  membersAreaMobile: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 10,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: -2, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  membersAreaHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
   membersHeader: {
     fontSize: 12,
     fontWeight: 'bold',
     color: Colors.textMuted,
-    marginBottom: 16,
+  },
+  refreshIcon: {
+    padding: 4,
+  },
+  membersList: {
+    flex: 1,
+    padding: 8,
   },
   memberCategory: {
     fontSize: 12,
     color: Colors.textMuted,
-    marginVertical: 8,
+    marginTop: 12,
+    marginBottom: 8,
+    paddingHorizontal: 4,
   },
   memberItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    paddingVertical: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 4,
   },
   memberAvatar: {
     position: 'relative',
@@ -1053,33 +1368,64 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontStyle: 'italic',
   },
-  emptyMembersContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  loadingMembersContainer: {
     alignItems: 'center',
+    justifyContent: 'center',
     padding: 16,
+    marginTop: 16,
+  },
+  loadingMembersText: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    marginTop: 8,
+  },
+  emptyMembersContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    marginTop: 16,
   },
   emptyMembersText: {
     color: Colors.textMuted,
     fontSize: 16,
-    marginTop: 8,
+    fontWeight: '600',
+    marginTop: 12,
+    textAlign: 'center',
   },
   emptyMembersSubtext: {
-    color: Colors.textMuted,
+    color: Colors.textSecondary,
     fontSize: 14,
+    marginTop: 8,
     textAlign: 'center',
-    marginTop: 4,
   },
   refreshButton: {
-    marginTop: 12,
+    backgroundColor: Colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: Colors.primary,
     borderRadius: 8,
+    marginTop: 16,
   },
   refreshButtonText: {
     color: Colors.text,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
+  membersErrorText: {
+    color: Colors.error,
+    fontSize: 14,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  closeMembersButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+  }
 });
