@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
+import "expo-router/entry";
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
 
 const queryClient = new QueryClient();
