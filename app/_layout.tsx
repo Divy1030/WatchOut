@@ -12,6 +12,7 @@ function AuthGuard() {
   const segments = useSegments();
   const router = useRouter();
 
+  // Log the current segments for debugging
   useEffect(() => {
     // Skip redirection during initial loading
     if (isLoading) return;
