@@ -1,32 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
 import {
-    useBlockUser,
-    useChangePassword,
-    useFriendsList,
-    useRemoveFriend,
-    useRespondToFriendRequest,
-    useSendFriendRequest,
-    useUnblockUser,
-    useUpdateUserProfile,
-    useUpdateUserStatus,
-    useUserProfile
+  useBlockUser,
+  useChangePassword,
+  useFriendsList,
+  useRemoveFriend,
+  useRespondToFriendRequest,
+  useSendFriendRequest,
+  useUnblockUser,
+  useUpdateUserProfile,
+  useUpdateProfilePhoto,
+  useUpdateUserStatus,
+  useUserProfile
 } from '../../src/lib/queries';
 import { useAuth } from '../../src/providers/AuthProvider';
 
@@ -85,6 +87,7 @@ export default function ProfileScreen() {
   const removeFriendMutation = useRemoveFriend();
   const blockUserMutation = useBlockUser();
   const unblockUserMutation = useUnblockUser();
+  const updateProfilePhotoMutation = useUpdateProfilePhoto();
 
   // Extract friends data
   const friends = friendsData?.data?.friends || [];
@@ -265,6 +268,42 @@ export default function ProfileScreen() {
     );
   };
 
+  // Handle avatar upload
+  const handleAvatarUpload = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Please allow access to your photos to update your avatar.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const uri = asset.uri;
+        const name = uri.split('/').pop() || 'avatar.jpg';
+        const type = asset.type || 'image/jpeg';
+
+        const formData = new FormData();
+        formData.append('avatar', {
+          uri,
+          name,
+          type,
+        } as any);
+
+        await updateProfilePhotoMutation.mutateAsync(formData);
+        refetchProfile();
+        Alert.alert('Success', 'Profile photo updated!');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to update profile photo');
+    }
+  };
+
   // Render friend item
   const renderFriendItem = ({ item }: { item: Friend }) => (
     <View style={styles.friendItem}>
@@ -426,13 +465,22 @@ export default function ProfileScreen() {
       {/* User Info */}
       <View style={styles.userSection}>
         <View style={styles.userInfo}>
-          <Image
-            source={{
-              uri: user?.avatarUrl ||
-                `https://via.placeholder.com/80/5865f2/ffffff?text=${user?.username?.charAt(0).toUpperCase()}`
-            }}
-            style={styles.userAvatar}
-          />
+          <View style={{ position: 'relative' }}>
+            <Image
+              source={{
+                uri: user?.avatarUrl ||
+                  `https://via.placeholder.com/80/5865f2/ffffff?text=${user?.username?.charAt(0).toUpperCase()}`
+              }}
+              style={styles.userAvatar}
+            />
+            {/* Edit Avatar Icon */}
+            <Pressable
+              style={styles.editAvatarIcon}
+              onPress={handleAvatarUpload}
+            >
+              <Ionicons name="camera" size={22} color={Colors.text} />
+            </Pressable>
+          </View>
           <View style={styles.userDetails}>
             <Text style={styles.userName}>
               {user?.displayName || user?.username}
@@ -1121,5 +1169,16 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     fontSize: 16,
+  },
+  editAvatarIcon: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: Colors.surfaceLight,
+    zIndex: 2,
   },
 });
