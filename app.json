@@ -35,7 +35,8 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
@@ -44,7 +45,8 @@
       "router": {},
       "eas": {
         "projectId": "b67fdcd2-9694-4218-93ed-62be27568d98"
-      }
+      },
+      "API_URL": "http://192.168.172.31:8000"
     }
   }
 }

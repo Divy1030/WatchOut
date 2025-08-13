@@ -133,6 +133,26 @@ export const useUpdateUserProfile = () => {
   });
 };
 
+export const useUpdateProfilePhoto = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (formData: FormData) => userApi.updateProfilePhoto(formData),
+    onSuccess: async (response) => {
+      queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+      // Optionally update stored user data if needed
+      if (response.avatarUrl) {
+        const userStr = await AsyncStorage.getItem('user');
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          user.avatarUrl = response.avatarUrl;
+          await AsyncStorage.setItem('user', JSON.stringify(user));
+        }
+      }
+    }
+  });
+};
+
 export const useFriendsList = () => {
   const { isAuthenticated } = useAuth();
   

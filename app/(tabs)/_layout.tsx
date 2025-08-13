@@ -31,8 +31,8 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size || 24} color={color} />
           ),
-          tabBarBadge: 62, // Badge count like in your screenshots
-          tabBarBadgeStyle: { backgroundColor: '#ed4245' }, // Discord red
+          tabBarBadge: 62,
+          tabBarBadgeStyle: { backgroundColor: '#ed4245' },
         }}
       />
       <Tabs.Screen
@@ -50,6 +50,15 @@ export default function TabLayout() {
           title: 'You',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size || 24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-circle" size={size || 24} color={color} />
           ),
         }}
       />

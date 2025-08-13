@@ -212,6 +212,16 @@ export const userApi = {
     return response.data;
   },
 
+  // Upload/update user profile photo
+  updateProfilePhoto: async (formData: FormData) => {
+    const response = await api.patch('/profile/photo', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
   // Get friends list
   getFriends: async () => {
     const response = await api.get('/users/friends');

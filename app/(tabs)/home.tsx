@@ -294,7 +294,10 @@ export default function HomeScreen() {
               {servers.map((server: ServerItem, index: number) => (
                 <Pressable
                   key={server._id || index}
-                  style={styles.serverItem}
+                  style={[
+                    styles.serverItem,
+                    { marginRight: 46 } // Add gap between servers
+                  ]}
                   onPress={() => router.push(`/server/${server._id}`)}
                 >
                   <View style={styles.serverIcon}>
@@ -306,12 +309,14 @@ export default function HomeScreen() {
                       </Text>
                     )}
                   </View>
-                  <Text style={styles.serverName} numberOfLines={1}>
-                    {server.name || 'Unnamed Server'}
-                  </Text>
-                  <Text style={styles.serverMembers}>
-                    {server.memberCount || 0} members
-                  </Text>
+                  <View style={{ alignItems: 'center', marginLeft: 8 }}>
+                    <Text style={[styles.serverName, { textAlign: 'center' }]} numberOfLines={1}>
+                      {server.name || 'Unnamed Server'}
+                    </Text>
+                    <Text style={[styles.serverMembers, { textAlign: 'center', marginTop: 2 }]}>
+                      {server.memberCount || 0} members
+                    </Text>
+                  </View>
                 </Pressable>
               ))}
             </ScrollView>
@@ -558,6 +563,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceLight,
     borderRadius: 8,
     marginBottom: 8,
+    
   },
   serverIconContainer: {
     position: 'relative',
