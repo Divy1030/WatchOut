@@ -1,5 +1,6 @@
 {
   "expo": {
+    "entryPoint": "./app/index.tsx",
     "name": "watchout",
     "slug": "watchout",
     "version": "1.0.0",
@@ -46,7 +47,8 @@
       "eas": {
         "projectId": "b67fdcd2-9694-4218-93ed-62be27568d98"
       },
-      "API_URL": "http://192.168.172.31:8000"
+      "API_URL": "https://watchout.onrender.com",
+      "expoPublicApiUrl": "https://watchout.onrender.com"
     }
   }
 }

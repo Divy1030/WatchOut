@@ -277,7 +277,7 @@ export default function ProfileScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // <-- fix deprecated warning
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.7,
@@ -286,15 +286,17 @@ export default function ProfileScreen() {
         const asset = result.assets[0];
         const uri = asset.uri;
         const name = uri.split('/').pop() || 'avatar.jpg';
+        // Always use 'image/jpeg' for jpg or 'image/png' for png
         const type = asset.type || 'image/jpeg';
 
         const formData = new FormData();
         formData.append('avatar', {
           uri,
           name,
-          type,
+          type: type.startsWith('image/') ? type : 'image/jpeg',
         } as any);
 
+        // Do NOT set Content-Type manually!
         await updateProfilePhotoMutation.mutateAsync(formData);
         refetchProfile();
         Alert.alert('Success', 'Profile photo updated!');

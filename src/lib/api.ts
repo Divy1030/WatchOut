@@ -214,11 +214,7 @@ export const userApi = {
 
   // Upload/update user profile photo
   updateProfilePhoto: async (formData: FormData) => {
-    const response = await api.patch('/profile/photo', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const response = await api.patch('/profile/photo', formData);
     return response.data;
   },
 
