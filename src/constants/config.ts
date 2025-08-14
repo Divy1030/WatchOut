@@ -1,1 +1,1 @@
-export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://watchout.onrender.com';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.172.31:8000';
