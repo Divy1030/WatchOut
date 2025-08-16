@@ -140,6 +140,49 @@ export const removeListener = (event: string): void => {
   socket?.off(event);
 };
 
+// Leave channel
+export const leaveChannel = (serverId: string, channelId: string): void => {
+  socket?.emit('leave-channel', serverId, channelId);
+  console.log(`Left channel room: channel:${channelId}`);
+};
+
+// Leave direct message room
+export const leaveDirectMessageRoom = (conversationId: string): void => {
+  socket?.emit('leave-dm', conversationId);
+  console.log(`Left DM room: dm:${conversationId}`);
+};
+
+// Update user status
+export const updateUserStatus = (userId: string, status: string, customStatus?: string): void => {
+  socket?.emit('status-update', { userId, status, customStatus });
+};
+
+// Voice channel events
+export const joinVoiceChannel = (serverId: string, channelId: string, userId: string): void => {
+  socket?.emit('join-voice', { serverId, channelId, userId });
+};
+
+export const leaveVoiceChannel = (serverId: string, channelId: string, userId: string): void => {
+  socket?.emit('leave-voice', { serverId, channelId, userId });
+};
+
+// New event listeners for enhanced features
+export const onNotification = (callback: (notification: any) => void): void => {
+  socket?.on('notification', callback);
+};
+
+export const onFriendStatusUpdate = (callback: (data: { userId: string; status: string; customStatus?: string }) => void): void => {
+  socket?.on('friendStatusUpdate', callback);
+};
+
+export const onUserJoinedVoice = (callback: (data: { userId: string }) => void): void => {
+  socket?.on('user-joined-voice', callback);
+};
+
+export const onUserLeftVoice = (callback: (data: { userId: string }) => void): void => {
+  socket?.on('user-left-voice', callback);
+};
+
 // Remove all listeners
 export const removeAllListeners = (): void => {
   if (!socket) return;
@@ -153,7 +196,11 @@ export const removeAllListeners = (): void => {
     'messagePinned',
     'messageUnpinned',
     'mention',
-    'typing'
+    'typing',
+    'notification',
+    'friendStatusUpdate',
+    'user-joined-voice',
+    'user-left-voice'
   ];
   
   events.forEach(event => socket?.off(event));

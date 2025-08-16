@@ -37,11 +37,23 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Add response interceptor to handle token refresh
+// Add response interceptor to handle token refresh and errors
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    
+    // Handle validation errors
+    if (error.response?.status === 400 && error.response?.data?.errors) {
+      console.log('❌ Validation errors:', error.response.data.errors);
+      // You can emit an event or use a global error handler here
+    }
+    
+    // Handle rate limiting
+    if (error.response?.status === 429) {
+      console.log('⚠️ Rate limited:', error.response.data.message);
+      // You can show a toast or notification here
+    }
     
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
@@ -305,6 +317,18 @@ export const serverApi = {
     return response.data;
   },
 
+  // Get server invites
+  getServerInvites: async (serverId: string) => {
+    const response = await api.get(`/servers/${serverId}/invites`);
+    return response.data;
+  },
+
+  // Revoke server invite
+  revokeInvite: async (serverId: string, inviteCode: string) => {
+    const response = await api.delete(`/servers/${serverId}/invites/${inviteCode}`);
+    return response.data;
+  },
+
   // Update server
   updateServer: async (serverId: string, data: any) => {
     const response = await api.patch(`/servers/${serverId}`, data);
@@ -320,6 +344,50 @@ export const serverApi = {
   // Leave server
   leaveServer: async (serverId: string) => {
     const response = await api.post(`/servers/${serverId}/leave`);
+    return response.data;
+  },
+
+  // Kick member
+  kickMember: async (serverId: string, userId: string) => {
+    const response = await api.post(`/servers/${serverId}/kick/${userId}`);
+    return response.data;
+  },
+
+  // Update member roles
+  updateMemberRoles: async (serverId: string, userId: string, roles: string[]) => {
+    const response = await api.patch(`/servers/${serverId}/members/${userId}/roles`, { roles });
+    return response.data;
+  },
+
+  // Channel management
+  createChannel: async (serverId: string, data: { name: string; type?: 'text' | 'voice'; topic?: string; isPrivate?: boolean }) => {
+    const response = await api.post(`/servers/${serverId}/channels`, data);
+    return response.data;
+  },
+
+  updateChannel: async (serverId: string, channelId: string, data: { name?: string; topic?: string; position?: number }) => {
+    const response = await api.patch(`/servers/${serverId}/channels/${channelId}`, data);
+    return response.data;
+  },
+
+  deleteChannel: async (serverId: string, channelId: string) => {
+    const response = await api.delete(`/servers/${serverId}/channels/${channelId}`);
+    return response.data;
+  },
+
+  // Role management
+  createRole: async (serverId: string, data: { name: string; color?: string; permissions?: string[]; position?: number }) => {
+    const response = await api.post(`/servers/${serverId}/roles`, data);
+    return response.data;
+  },
+
+  updateRole: async (serverId: string, roleId: string, data: { name?: string; color?: string; permissions?: string[]; position?: number }) => {
+    const response = await api.patch(`/servers/${serverId}/roles/${roleId}`, data);
+    return response.data;
+  },
+
+  deleteRole: async (serverId: string, roleId: string) => {
+    const response = await api.delete(`/servers/${serverId}/roles/${roleId}`);
     return response.data;
   },
 };
@@ -409,5 +477,66 @@ export const messageApi = {
     
     const response = await api.get(endpoint);
     return response.data;
-  }
+  },
+
+  // Upload message attachment
+  uploadAttachment: async (file: FormData) => {
+    const response = await api.post('/messages/upload', file, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  // Send channel message with attachments
+  sendChannelMessageWithAttachments: async (serverId: string, channelId: string, data: { content?: string; mentions?: string[]; attachments?: any[] }) => {
+    const response = await api.post(`/messages/channels/${serverId}/${channelId}/attachments`, data);
+    return response.data;
+  },
+
+  // Send direct message with attachments
+  sendDirectMessageWithAttachments: async (userId: string, data: { content?: string; attachments?: any[] }) => {
+    const response = await api.post(`/messages/dm/${userId}/attachments`, data);
+    return response.data;
+  },
+};
+
+// Notification API endpoints
+export const notificationApi = {
+  // Get notifications
+  getNotifications: async (limit: number = 20, offset: number = 0) => {
+    const response = await api.get(`/notifications?limit=${limit}&offset=${offset}`);
+    return response.data;
+  },
+
+  // Mark notification as read
+  markAsRead: async (notificationId: string) => {
+    const response = await api.post(`/notifications/${notificationId}/read`);
+    return response.data;
+  },
+
+  // Mark all notifications as read
+  markAllAsRead: async () => {
+    const response = await api.post('/notifications/read-all');
+    return response.data;
+  },
+
+  // Delete notification
+  deleteNotification: async (notificationId: string) => {
+    const response = await api.delete(`/notifications/${notificationId}`);
+    return response.data;
+  },
+
+  // Clear all notifications
+  clearAll: async () => {
+    const response = await api.delete('/notifications/clear-all');
+    return response.data;
+  },
+
+  // Update notification preferences
+  updatePreferences: async (preferences: { mentions?: boolean; directMessages?: boolean; friendRequests?: boolean; serverInvites?: boolean }) => {
+    const response = await api.patch('/notifications/preferences', preferences);
+    return response.data;
+  },
 };
