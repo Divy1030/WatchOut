@@ -47,8 +47,8 @@
       "eas": {
         "projectId": "065d475e-074f-46b3-863a-1f1be80463a1"
       },
-      "API_URL": "http://192.168.172.31:8000",
-      "expoPublicApiUrl": "http://192.168.172.31:8000"
+      "API_URL": "http://10.190.106.31:8000",
+      "expoPublicApiUrl": "http://10.190.106.31:8000"
     },
     "owner": "divy1030"
   }

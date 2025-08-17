@@ -1,18 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import {
-    FlatList,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-    TouchableOpacity,
-    ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors } from '../../constants/Colors';
-import { useNotificationsContext } from '../../src/providers/NotificationProvider';
-import { useMarkAllNotificationsAsRead, useDeleteNotification } from '../../src/lib/queries';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { Stack } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { useNotificationsContext } from '../src/providers/NotificationProvider';
+import { useMarkAllNotificationsAsRead, useDeleteNotification } from '../src/lib/queries';
+import {Colors} from '../constants/Colors';
 
 export default function NotificationsScreen() {
   const { notifications, markAsRead, isLoading } = useNotificationsContext();
@@ -38,7 +30,7 @@ export default function NotificationsScreen() {
         onPress={() => markAsRead(item.id)}
       >
         <View style={styles.notificationContent}>
-          <Text style={styles.notificationText}>{item.content}</Text>
+          <Text style={styles.notificationText}>{item.message}</Text>
           <Text style={styles.notificationTime}>{formattedDate} at {formattedTime}</Text>
         </View>
         <TouchableOpacity 
@@ -52,39 +44,40 @@ export default function NotificationsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Notifications</Text>
-        {notifications && notifications.length > 0 && (
-          <TouchableOpacity 
-            style={styles.headerButton} 
-            onPress={handleMarkAllAsRead}
-            disabled={markAllAsReadMutation.isPending}
-          >
-            <Text style={styles.markAllText}>Mark all as read</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      
+    <View style={styles.container}>
+      <Stack.Screen 
+        options={{
+          title: 'Notifications',
+          headerRight: () => (
+            <TouchableOpacity 
+              style={styles.markAllButton} 
+              onPress={handleMarkAllAsRead}
+              disabled={markAllAsReadMutation.isPending}
+            >
+              <Text style={styles.markAllText}>Mark all as read</Text>
+            </TouchableOpacity>
+          ),
+        }} 
+      />
+
       {isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
-      ) : notifications && notifications.length === 0 ? (
+      ) : !notifications || notifications.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="notifications-off-outline" size={64} color={Colors.textMuted} />
           <Text style={styles.emptyText}>No notifications yet</Text>
         </View>
       ) : (
         <FlatList
-          data={notifications}
+          data={notifications || []}
           renderItem={renderNotificationItem}
           keyExtractor={(item) => item.id}
-          style={styles.notificationsList}
-          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.listContainer}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -109,11 +102,14 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 16,
   },
+  listContainer: {
+    padding: 16,
+  },
   notificationItem: {
     flexDirection: 'row',
     padding: 16,
     borderRadius: 8,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.background,
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -141,39 +137,12 @@ const styles = StyleSheet.create({
     padding: 8,
     justifyContent: 'center',
   },
+  markAllButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
   markAllText: {
     color: Colors.primary,
     fontWeight: '600',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    paddingTop: 20,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: Colors.text,
-  },
-  headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  notificationsList: {
-    flex: 1,
-  }
 });

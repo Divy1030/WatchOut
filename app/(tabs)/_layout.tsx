@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Colors } from '../../constants/Colors';
+import NotificationIcon from '../../src/components/NotificationIcon';
 
 export default function TabLayout() {
   return (
@@ -40,7 +41,7 @@ export default function TabLayout() {
         options={{
           title: 'Notifications',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="notifications" size={size || 24} color={color} />
+            <NotificationIcon size={size || 24} color={color} />
           ),
         }}
       />

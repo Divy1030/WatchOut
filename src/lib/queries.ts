@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../providers/AuthProvider';
-import { authApi, messageApi, serverApi, userApi } from './api';
+import { authApi, messageApi, notificationApi, serverApi, userApi } from './api';
 
 // Auth queries and mutations
 export const useAuthStatus = () => {
@@ -91,6 +91,51 @@ export const useChangePassword = () => {
   return useMutation({
     mutationFn: ({ oldPassword, newPassword }: { oldPassword: string, newPassword: string }) => 
       authApi.changePassword(oldPassword, newPassword)
+  });
+};
+
+// Notification queries and mutations
+export const useNotifications = (limit = 20, offset = 0) => {
+  const { isAuthenticated } = useAuth();
+  
+  return useQuery({
+    queryKey: ['notifications', limit, offset],
+    queryFn: () => notificationApi.getUserNotifications(limit, offset),
+    enabled: isAuthenticated,
+    staleTime: 1000 * 60, // 1 minute
+  });
+};
+
+export const useMarkNotificationAsRead = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (notificationId: string) => notificationApi.markAsRead(notificationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    }
+  });
+};
+
+export const useMarkAllNotificationsAsRead = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: () => notificationApi.markAllAsRead(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    }
+  });
+};
+
+export const useDeleteNotification = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (notificationId: string) => notificationApi.deleteNotification(notificationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    }
   });
 };
 
@@ -378,12 +423,11 @@ export const useDirectMessages = (userId: string) => {
 
 export const useSendDirectMessage = () => {
   const queryClient = useQueryClient();
-  
   return useMutation({
-    mutationFn: ({ userId, content }: { userId: string, content: string }) => 
-      messageApi.sendDirectMessage(userId, content),
+    mutationFn: ({ receiverId, content, replyTo }: { receiverId: string, content: string, replyTo?: string }) =>
+      messageApi.sendDirectMessage(receiverId, content, replyTo),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['directMessages', variables.userId] });
+      queryClient.invalidateQueries({ queryKey: ['directMessages', variables.receiverId] });
     }
   });
 };
@@ -491,3 +535,6 @@ export const useSearchUsers = (query: string) => {
     staleTime: 30000, // Cache for 30 seconds
   });
 };
+
+// The notification hooks (useMarkNotificationAsRead, useMarkAllNotificationsAsRead, useDeleteNotification)
+// are already defined above, so we don't need to redefine them here.

@@ -93,22 +93,85 @@ export const onNewMessage = (callback: (message: any) => void): void => {
   socket?.on('newMessage', callback);
 };
 
-// Change this function to match the backend's event name
 export const onNewDirectMessage = (callback: (message: any) => void): void => {
-  // Change 'new-direct-message' to 'newDirectMessage' to match backend
   socket?.on('newDirectMessage', callback);
 };
 
-export const onMessageUpdated = (callback: (message: any) => void): void => {
-  socket?.on('messageUpdated', callback);
+// Function to handle typing indicator events
+export const onTypingIndicator = (callback: (data: {
+  userId: string;
+  username: string;
+  isTyping: boolean;
+}) => void): void => {
+  socket?.on('typing', callback);
 };
 
+// Function to handle message deletion events
 export const onMessageDeleted = (callback: (messageId: string) => void): void => {
   socket?.on('messageDeleted', callback);
 };
 
+// Function to update user status
+export const updateUserStatusObj = (data: {
+  userId: string;
+  status: string;
+  customStatus?: string;
+}): void => {
+  socket?.emit('status-update', data);
+};
+
+// Function to join voice channel with object parameter
+export const joinVoiceChannelObj = (data: {
+  serverId: string;
+  channelId: string;
+  userId: string;
+}): void => {
+  socket?.emit('join-voice', data);
+};
+
+// Function to leave voice channel with object parameter
+export const leaveVoiceChannelObj = (data: {
+  serverId: string;
+  channelId: string;
+  userId: string;
+}): void => {
+  socket?.emit('leave-voice', data);
+};
+
+// Function to remove all socket listeners
+// This function has been moved to a more comprehensive implementation at the end of the file.
+// See line ~243
+
+// Function to handle message reaction events
 export const onMessageReaction = (callback: (message: any) => void): void => {
   socket?.on('messageReaction', callback);
+};
+
+export const onFriendStatusUpdate = (callback: (data: {
+  userId: string;
+  status: string;
+  customStatus?: string;
+}) => void): void => {
+  socket?.on('friendStatusUpdate', callback);
+};
+
+// Listen for notification events
+export const onNotification = (callback: (notification: any) => void): void => {
+  socket?.on('notification', callback);
+};
+
+// Listen for voice channel join events
+export const onUserJoinedVoice = (callback: (data: { userId: string }) => void): void => {
+  socket?.on('user-joined-voice', callback);
+};
+
+// Listen for voice channel leave events
+export const onUserLeftVoice = (callback: (data: { userId: string }) => void): void => {
+  socket?.on('user-left-voice', callback);
+};
+
+export const onMessageUpdated = (callback: (message: any) => void): void => {
+  socket?.on('messageUpdated', callback);
 };
 
 export const onMessagePinned = (callback: (message: any) => void): void => {
@@ -125,14 +188,6 @@ export const onMention = (callback: (data: {
   channel: string;
 }) => void): void => {
   socket?.on('mention', callback);
-};
-
-export const onTypingIndicator = (callback: (data: {
-  userId: string;
-  username: string;
-  isTyping: boolean;
-}) => void): void => {
-  socket?.on('typing', callback);
 };
 
 // Remove listeners when no longer needed
@@ -166,22 +221,7 @@ export const leaveVoiceChannel = (serverId: string, channelId: string, userId: s
   socket?.emit('leave-voice', { serverId, channelId, userId });
 };
 
-// New event listeners for enhanced features
-export const onNotification = (callback: (notification: any) => void): void => {
-  socket?.on('notification', callback);
-};
-
-export const onFriendStatusUpdate = (callback: (data: { userId: string; status: string; customStatus?: string }) => void): void => {
-  socket?.on('friendStatusUpdate', callback);
-};
-
-export const onUserJoinedVoice = (callback: (data: { userId: string }) => void): void => {
-  socket?.on('user-joined-voice', callback);
-};
-
-export const onUserLeftVoice = (callback: (data: { userId: string }) => void): void => {
-  socket?.on('user-left-voice', callback);
-};
+// These event listeners are already defined above
 
 // Remove all listeners
 export const removeAllListeners = (): void => {

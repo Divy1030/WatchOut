@@ -3,6 +3,7 @@ import { Slot, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import "expo-router/entry";
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
+import { NotificationProvider } from '../src/providers/NotificationProvider';
 
 const queryClient = new QueryClient();
 
@@ -48,7 +49,9 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <AuthGuard />
+        <NotificationProvider>
+          <AuthGuard />
+        </NotificationProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

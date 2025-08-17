@@ -415,14 +415,14 @@ export const messageApi = {
     const params = new URLSearchParams();
     if (cursor) params.append('cursor', cursor);
     params.append('limit', limit.toString());
-    
-    const response = await api.get(`/messages/dm/${userId}?${params}`);
+    // Use /messages/direct/:userId
+    const response = await api.get(`/messages/direct/${userId}?${params}`);
     return response.data;
   },
 
   // Send direct message
-  sendDirectMessage: async (userId: string, content: string) => {
-    const response = await api.post(`/messages/dm/${userId}`, { content });
+  sendDirectMessage: async (receiverId: string, content: string, replyTo?: string) => {
+    const response = await api.post(`/messages/direct`, { receiverId, content, replyTo });
     return response.data;
   },
 
@@ -502,26 +502,46 @@ export const messageApi = {
   },
 };
 
+// In-memory notification store (in production, use Redis or database)
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'mention' | 'friend_request' | 'direct_message' | 'server_invite';
+  title: string;
+  message: string;
+  data?: any;
+  read: boolean;
+  createdAt: Date;
+}
+
 // Notification API endpoints
 export const notificationApi = {
-  // Get notifications
+  // Get user notifications
+  getUserNotifications: async (limit = 20, offset = 0) => {
+    const response = await api.get(`/notifications?limit=${limit}&offset=${offset}`);
+    return response.data;
+  },
+  
+  // Get notifications (alias for getUserNotifications for backward compatibility)
   getNotifications: async (limit: number = 20, offset: number = 0) => {
     const response = await api.get(`/notifications?limit=${limit}&offset=${offset}`);
     return response.data;
   },
-
+  
   // Mark notification as read
   markAsRead: async (notificationId: string) => {
-    const response = await api.post(`/notifications/${notificationId}/read`);
+    // Using PATCH as the standard RESTful method for partial updates
+    const response = await api.patch(`/notifications/${notificationId}/read`);
     return response.data;
   },
-
+  
   // Mark all notifications as read
   markAllAsRead: async () => {
-    const response = await api.post('/notifications/read-all');
+    // Using PATCH as the standard RESTful method for partial updates
+    const response = await api.patch('/notifications/read-all');
     return response.data;
   },
-
+  
   // Delete notification
   deleteNotification: async (notificationId: string) => {
     const response = await api.delete(`/notifications/${notificationId}`);
