@@ -389,6 +389,7 @@ export const useChannelMessages = (serverId: string, channelId: string) => {
     queryKey: ['channelMessages', serverId, channelId],
     queryFn: () => messageApi.getChannelMessages(serverId, channelId),
     enabled: !!serverId && !!channelId,
+    
   });
 };
 

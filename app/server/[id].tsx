@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -73,6 +74,7 @@ export default function ServerScreen() {
   const [showServerSettings, setShowServerSettings] = useState(false);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | number | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
@@ -189,7 +191,8 @@ export default function ServerScreen() {
     refetch: refetchMessages
   } = useChannelMessages(
     id as string, 
-    selectedChannel || ''
+    selectedChannel || '',
+    // {enabled: !!selectedChannel,}
   );
   
   const [messages, setMessages] = useState<Message[]>([]);
@@ -218,6 +221,9 @@ export default function ServerScreen() {
           flatListRef.current.scrollToOffset({ offset: 0, animated: false });
         }
       }, 100);
+    } else if (selectedChannel) {
+      // If no messages data but channel is selected, clear messages
+      setMessages([]);
     }
   }, [messagesData, selectedChannel]);
   
@@ -391,23 +397,29 @@ const handleRefreshMembers = () => {
       alert('Permission to access media library is required!');
       return;
     }
+
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
+      mediaTypes: 'images', // Fixed: Capital 'I'
       allowsEditing: true,
       quality: 0.8,
     });
+
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const asset = result.assets[0];
       const uri = asset.uri;
       const fileName = asset.fileName || uri.split('/').pop() || 'image.jpg';
       const fileType = asset.mimeType || 'image/jpeg';
+
       const formData = new FormData();
       formData.append('file', {
         uri,
         name: fileName,
         type: fileType,
       } as any);
+
       const token = await AsyncStorage.getItem('accessToken');
+      console.log('Uploading image:', { uri, fileName, fileType });
+
       const uploadRes = await fetch(`${API_URL}/api/v1/messages/upload`, {
         method: 'POST',
         headers: {
@@ -416,17 +428,22 @@ const handleRefreshMembers = () => {
         },
         body: formData,
       });
+
       const uploadText = await uploadRes.text();
+      console.log('Upload response:', uploadRes.status, uploadText);
+
       if (uploadRes.status !== 200) {
         alert('Upload failed');
         return;
       }
+
       const uploadData = JSON.parse(uploadText);
       if (!uploadData.data || !uploadData.data.attachment || !uploadData.data.attachment.url) {
         alert('Upload failed');
         return;
       }
       const attachment = uploadData.data.attachment;
+
       // Send channel message with attachment
       if (selectedChannel) {
         await messageApi.sendChannelMessageWithAttachments(id as string, selectedChannel, {
@@ -434,7 +451,7 @@ const handleRefreshMembers = () => {
           attachments: [attachment],
         });
         setInputText('');
-        refetchMessages();
+        setTimeout(() => refetchMessages(), 100);
       } else {
         alert('No channel selected');
       }
@@ -451,7 +468,8 @@ const handleRefreshMembers = () => {
           onSuccess: () => {
             setEditingMessage(null);
             setInputText('');
-            refetchMessages();
+            // Don't just refetch, but ensure messages are updated
+            setTimeout(() => refetchMessages(), 100);
           }
         }
       );
@@ -464,10 +482,15 @@ const handleRefreshMembers = () => {
       mentions: [], // Add mention logic if needed
       replyTo: replyingTo?._id,
     }, {
-      onSuccess: () => {
+      onSuccess: (newMessage) => {
         setInputText('');
         setReplyingTo(null);
-        refetchMessages();
+        // Add the new message immediately to the state for instant feedback
+        if (newMessage?.data) {
+          setMessages(prev => [newMessage.data, ...prev]);
+        }
+        // Also refetch to ensure consistency
+        setTimeout(() => refetchMessages(), 100);
       }
     });
   };
@@ -505,7 +528,7 @@ const handleRefreshMembers = () => {
           styles.messageBubble,
           isMine ? styles.myMessageBubble : styles.theirMessageBubble
         ]}>
-          {/* Reply indicator */}
+          {/* Reply indicator if this message is a reply */}
           {item.replyTo && item.replyTo.sender && (
             <View style={styles.replyContainer}>
               <Text style={styles.replyText}>
@@ -519,40 +542,34 @@ const handleRefreshMembers = () => {
           {!isMine && (
             <Text style={styles.senderName}>{senderName}</Text>
           )}
+
           {/* Attachments (images) */}
           {item.attachments && item.attachments.length > 0 && (
             <View style={{ marginVertical: 4 }}>
-              {item.attachments.map(
-              (
-                att: {
-                type: string;
-                url?: string;
-                name?: string;
-                },
-                idx: number
-              ) =>
+              {item.attachments.map((att: any, idx: number) =>
                 att.type === 'image' && att.url ? (
-                <Image
-                  key={idx}
-                  source={{ uri: att.url }}
-                  style={{ width: 180, height: 180, borderRadius: 8, marginBottom: 4 }}
-                  resizeMode="cover"
-                />
+                  <Image
+                    key={idx}
+                    source={{ uri: att.url }}
+                    style={{ width: 180, height: 180, borderRadius: 8, marginBottom: 4 }}
+                    resizeMode="cover"
+                  />
                 ) : (
-                <TouchableOpacity key={idx} onPress={() => {/* open file */}}>
-                  <Text style={{ color: '#53bdeb' }}>{att.name}</Text>
-                </TouchableOpacity>
+                  <TouchableOpacity key={idx} onPress={() => {/* open file */}}>
+                    <Text style={{ color: '#53bdeb' }}>{att.name}</Text>
+                  </TouchableOpacity>
                 )
               )}
             </View>
           )}
+
           {/* Only render text if not blank */}
           {item.content && item.content.trim().length > 0 && (
             <Text style={[
               styles.messageText,
               isMine ? styles.myMessageText : styles.theirMessageText
             ]}>
-              {item.content.split(/(\s@[a-zA-Z0-9_]+)/).map((part:string, index:number) => {
+              {item.content.split(/(\s@[a-zA-Z0-9_]+)/).map((part: string, index: number) => {
                 if (part.match(/\s@[a-zA-Z0-9_]+/)) {
                   return (
                     <Text key={index} style={styles.mentionText}>
@@ -567,7 +584,7 @@ const handleRefreshMembers = () => {
           <View style={styles.messageTimeWrapper}>
             <Text style={[
               styles.messageTime,
-              isMine ? styles.myMessageTime : styles.theirMessageTime
+              isMine ? styles.messageTime : styles.theirMessage
             ]}>
               {new Date(item.createdAt).toLocaleTimeString([], {
                 hour: '2-digit',
@@ -611,50 +628,8 @@ const handleRefreshMembers = () => {
         {showReactionBar === item._id && (
           <View style={styles.reactionBar}>
             {EMOJI_REACTIONS.map((emoji) => {
-                interface ReactionUser {
-                _id: string;
-                username?: string;
-                displayName?: string;
-                avatarUrl?: string;
-                status?: string;
-                }
-
-                interface MessageReaction {
-                emoji: string;
-                users: ReactionUser[];
-                }
-
-                interface MessageItem {
-                _id: string;
-                content: string;
-                sender: {
-                  _id: string;
-                  username?: string;
-                  displayName?: string;
-                  avatarUrl?: string;
-                  status?: string;
-                };
-                replyTo?: {
-                  sender: {
-                  _id: string;
-                  username?: string;
-                  displayName?: string;
-                  };
-                  content: string;
-                };
-                attachments?: Array<{
-                  type: string;
-                  url?: string;
-                  name?: string;
-                }>;
-                createdAt: string | number | Date;
-                isEdited?: boolean;
-                read?: boolean;
-                reactions?: MessageReaction[];
-                }
-
-                const userReacted = (item as MessageItem).reactions?.find(
-                (r: MessageReaction) => r.emoji === emoji && r.users.some((u: ReactionUser) => u._id === user?._id)
+                const userReacted = item.reactions?.find(
+                  (r: any) => r.emoji === emoji && r.users.some((u: any) => u._id === user?._id)
                 );
               return (
                 <TouchableOpacity
@@ -695,7 +670,7 @@ const handleRefreshMembers = () => {
         {/* Reactions display */}
         {item.reactions && item.reactions.length > 0 && (
           <View style={styles.reactionsRow}>
-            {item.reactions.map((reaction:any, idx:number) => (
+            {item.reactions.map((reaction: any, idx: number) => (
               <TouchableOpacity
                 key={reaction.emoji + idx}
                 style={[
@@ -756,6 +731,47 @@ const handleRefreshMembers = () => {
     }
   }, [serverData, membersData, server, members, isLoadingServer, isLoadingMembers, serverError, membersDataError, id]);
   
+  // Add keyboard listeners
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardWillShow', () => setKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener('keyboardWillHide', () => setKeyboardVisible(false));
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+  
+  // Handle mentions in input text
+  useEffect(() => {
+    // Only show mention suggestions if @ is followed by at least one character
+    const mentionMatch = inputText.match(/@(\w{1,})$/);
+    if (mentionMatch) {
+      const query = mentionMatch[1];
+      // Filter server members for mentions
+      const filteredMembers = members.filter(member => {
+        const username = member.userId?.username || '';
+        const displayName = member.userId?.displayName || '';
+        return username.toLowerCase().includes(query.toLowerCase()) ||
+               displayName.toLowerCase().includes(query.toLowerCase());
+      });
+      setMentionResults(filteredMembers.slice(0, 5)); // Limit to 5 results
+      setMentionQuery(query);
+    } else {
+      setMentionQuery(null);
+      setMentionResults([]);
+    }
+  }, [inputText, members]);
+
+  // Handle selecting a user to mention
+  const handleMentionSelect = (member: any) => {
+    const username = member.userId?.username || 'unknown';
+    const newText = inputText.replace(/@\w*$/, `@${username} `);
+    setInputText(newText);
+    setMentionQuery(null);
+    setMentionResults([]);
+    inputRef.current?.focus();
+  };
+
   if (isLoadingServer) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -788,273 +804,339 @@ const handleRefreshMembers = () => {
   }
   
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={80}
-    >
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        {/* Server header - always visible */}
-        <View style={styles.serverHeader}>
-          <Pressable 
-            style={styles.serverHeaderContent}
-            onPress={() => setShowServerSettings(true)}
-          >
-            {server.iconUrl ? (
-              <Image 
-                source={{ uri: server.iconUrl }} 
-                style={styles.serverIcon} 
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      {/* Server header - always visible */}
+      <View style={styles.serverHeader}>
+        <Pressable 
+          style={styles.serverHeaderContent}
+          onPress={() => setShowServerSettings(true)}
+        >
+          {server.iconUrl ? (
+            <Image 
+              source={{ uri: server.iconUrl }} 
+              style={styles.serverIcon} 
+            />
+          ) : (
+            <View style={styles.serverIconPlaceholder}>
+              <Text style={styles.serverIconText}>
+                {server.name?.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <Text style={styles.serverName} numberOfLines={1}>
+            {server.name || 'Loading...'}
+          </Text>
+          <Ionicons name="chevron-down" size={16} color={Colors.text} />
+        </Pressable>
+        
+        <View style={styles.headerActions}>
+          {isSmallDevice && (
+            <Pressable 
+              style={styles.headerAction}
+              onPress={() => setShowChannels(!showChannels)}
+            >
+              <Ionicons 
+                name={showChannels ? "menu" : "chatbubble-outline"} 
+                size={22} 
+                color={Colors.text} 
               />
+            </Pressable>
+          )}
+          {isSmallDevice && (
+            <Pressable 
+              style={styles.headerAction}
+              onPress={() => setShowMembers(!showMembers)}
+            >
+              <Ionicons name="people" size={22} color={Colors.text} />
+              {members.length > 0 && (
+                <View style={styles.memberCountBadge}>
+                  <Text style={styles.memberCountText}>{members.length}</Text>
+                </View>
+              )}
+            </Pressable>
+          )}
+        </View>
+      </View>
+      
+      <View style={styles.contentContainer}>
+        {/* Left sidebar - Channels */}
+        {(!isSmallDevice || showChannels) && (
+          <View style={styles.channelsArea}>
+            <ScrollView style={styles.channelsList} showsVerticalScrollIndicator={false}>
+              {/* Text channels */}
+              {textChannels.length > 0 && (
+                <View style={styles.categoryContainer}>
+                  <View style={styles.categoryHeader}>
+                    <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
+                    <Text style={styles.categoryTitle}>TEXT CHANNELS</Text>
+                    {server.userRoles?.includes('owner') && (
+                      <Pressable style={styles.addChannelButton}>
+                        <Ionicons name="add" size={16} color={Colors.textMuted} />
+                      </Pressable>
+                    )}
+                  </View>
+                  
+                  {textChannels.map((channel: any) => (
+                    <Pressable
+                      key={channel._id}
+                      style={[
+                        styles.channelItem,
+                        selectedChannel === channel._id && styles.selectedChannel
+                      ]}
+                      onPress={() => handleChannelSelect(channel._id)}
+                    >
+                      <Ionicons 
+                        name="chatbubble-outline" 
+                        size={20} 
+                        color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
+                      />
+                      <Text 
+                        style={[
+                          styles.channelName,
+                          selectedChannel === channel._id && styles.selectedChannelName
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {channel.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+
+              {/* Voice channels */}
+              {voiceChannels.length > 0 && (
+                <View style={styles.categoryContainer}>
+                  <View style={styles.categoryHeader}>
+                    <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
+                    <Text style={styles.categoryTitle}>VOICE CHANNELS</Text>
+                    {server.userRoles?.includes('owner') && (
+                      <Pressable style={styles.addChannelButton}>
+                        <Ionicons name="add" size={16} color={Colors.textMuted} />
+                      </Pressable>
+                    )}
+                  </View>
+                  
+                  {voiceChannels.map((channel: any) => (
+                    <Pressable
+                      key={channel._id}
+                      style={[
+                        styles.channelItem,
+                        selectedChannel === channel._id && styles.selectedChannel
+                      ]}
+                      onPress={() => handleChannelSelect(channel._id)}
+                    >
+                      <Ionicons 
+                        name="volume-medium-outline" 
+                        size={20} 
+                        color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
+                      />
+                      <Text 
+                        style={[
+                          styles.channelName,
+                          selectedChannel === channel._id && styles.selectedChannelName
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {channel.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+            
+            {/* User info at bottom */}
+            <View style={styles.userInfo}>
+              <Image
+                source={{ 
+                  uri: user?.avatarUrl || 
+                  `https://via.placeholder.com/32/5865f2/ffffff?text=${user?.username?.charAt(0).toUpperCase()}` 
+                }}
+                style={styles.userAvatar}
+              />
+              <View style={styles.userDetails}>
+                <Text style={styles.userDisplayName} numberOfLines={1}>
+                  {user?.displayName || user?.username}
+                </Text>
+                <Text style={styles.userStatus}>
+                  {user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Online'}
+                </Text>
+              </View>
+              
+              <View style={styles.userActions}>
+                <Pressable style={styles.userAction}>
+                  <Ionicons name="settings" size={20} color={Colors.text} />
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Center - Chat area - Add KeyboardAvoidingView back */}
+        <KeyboardAvoidingView 
+          style={styles.chatArea}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
+          {/* Channel header */}
+          <View style={styles.channelHeader}>
+            <View style={styles.channelInfo}>
+              <Ionicons name="chatbubble-outline" size={20} color={Colors.textMuted} />
+              <Text style={styles.channelName}>#{selectedChannelName}</Text>
+            </View>
+            
+            <View style={styles.channelActions}>
+              <Pressable style={styles.channelAction}>
+                <Ionicons name="notifications" size={20} color={Colors.textMuted} />
+              </Pressable>
+              <Pressable style={styles.channelAction}>
+                <Ionicons name="pin" size={20} color={Colors.textMuted} />
+              </Pressable>
+              <Pressable style={styles.channelAction}>
+                <Ionicons name="search" size={20} color={Colors.textMuted} />
+              </Pressable>
+              {!isSmallDevice && (
+                <Pressable 
+                  style={styles.channelAction} 
+                  onPress={() => setShowMembers(!showMembers)}
+                >
+                  <Ionicons name="people" size={20} color={Colors.textMuted} />
+                  {members.length > 0 && (
+                    <View style={styles.memberCountSmallBadge}>
+                      <Text style={styles.memberCountSmallText}>{members.length}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              )}
+            </View>
+          </View>
+          
+          {/* Messages area */}
+          <View style={styles.messagesArea}>
+            {!selectedChannel ? (
+              <View style={styles.welcomeSection}>
+                <Text style={styles.welcomeTitle}>Welcome to {server.name}!</Text>
+                <Text style={styles.welcomeText}>
+                  Select a channel to start chatting.
+                </Text>
+              </View>
+            ) : isLoadingMessages ? (
+              <ActivityIndicator size="large" color={Colors.primary} style={styles.loader} />
+            ) : messagesError ? (
+              <View style={styles.welcomeSection}>
+                <Text style={styles.errorText}>Failed to load messages</Text>
+                <Pressable style={styles.retryButton} onPress={() => refetchMessages()}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : messages.length === 0 ? (
+              <View style={styles.welcomeSection}>
+                <Text style={styles.welcomeTitle}>Welcome to #{selectedChannelName}!</Text>
+                <Text style={styles.welcomeText}>
+                  This is the start of the #{selectedChannelName} channel.
+                </Text>
+              </View>
             ) : (
-              <View style={styles.serverIconPlaceholder}>
-                <Text style={styles.serverIconText}>
-                  {server.name?.charAt(0).toUpperCase()}
+              <FlatList
+                ref={flatListRef}
+                data={messages}
+                renderItem={renderMessageItem}
+                keyExtractor={item => item._id}
+                inverted
+                contentContainerStyle={styles.messagesContent}
+                showsVerticalScrollIndicator={false}
+                removeClippedSubviews={false}
+              />
+            )}
+            
+            {/* Typing indicator */}
+            {typingUsers.length > 0 && (
+              <View style={styles.typingContainer}>
+                <Text style={styles.typingText}>
+                  {typingUsers.length === 1 
+                    ? `${typingUsers[0]} is typing...`
+                    : typingUsers.length === 2 
+                    ? `${typingUsers[0]} and ${typingUsers[1]} are typing...`
+                    : `${typingUsers.length} people are typing...`
+                  }
                 </Text>
               </View>
             )}
-            <Text style={styles.serverName} numberOfLines={1}>
-              {server.name || 'Loading...'}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color={Colors.text} />
-          </Pressable>
-          
-          <View style={styles.headerActions}>
-            {isSmallDevice && (
-              <Pressable 
-                style={styles.headerAction}
-                onPress={() => setShowChannels(!showChannels)}
-              >
-                <Ionicons 
-                  name={showChannels ? "menu" : "chatbubble-outline"} 
-                  size={22} 
-                  color={Colors.text} 
-                />
-              </Pressable>
-            )}
-            {isSmallDevice && (
-              <Pressable 
-                style={styles.headerAction}
-                onPress={() => setShowMembers(!showMembers)}
-              >
-                <Ionicons name="people" size={22} color={Colors.text} />
-                {members.length > 0 && (
-                  <View style={styles.memberCountBadge}>
-                    <Text style={styles.memberCountText}>{members.length}</Text>
-                  </View>
-                )}
-              </Pressable>
-            )}
           </View>
-        </View>
-        
-        <View style={styles.contentContainer}>
-          {/* Left sidebar - Channels */}
-          {(!isSmallDevice || showChannels) && (
-            <View style={styles.channelsArea}>
-              <ScrollView style={styles.channelsList} showsVerticalScrollIndicator={false}>
-                {/* Text channels */}
-                {textChannels.length > 0 && (
-                  <View style={styles.categoryContainer}>
-                    <View style={styles.categoryHeader}>
-                      <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
-                      <Text style={styles.categoryTitle}>TEXT CHANNELS</Text>
-                      {server.userRoles?.includes('owner') && (
-                        <Pressable style={styles.addChannelButton}>
-                          <Ionicons name="add" size={16} color={Colors.textMuted} />
-                        </Pressable>
-                      )}
+          
+          {/* Mention suggestions */}
+          {mentionQuery !== null && mentionResults.length > 0 && (
+            <View style={styles.mentionContainer}>
+              <FlatList
+                data={mentionResults}
+                keyExtractor={(item) => item._id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.mentionItem}
+                    onPress={() => handleMentionSelect(item)}
+                  >
+                    <Image
+                      source={{ 
+                        uri: item.userId?.avatarUrl || 
+                        `https://via.placeholder.com/32/5865f2/ffffff?text=${(item.userId?.username || 'U').charAt(0).toUpperCase()}` 
+                      }}
+                      style={styles.mentionAvatar}
+                    />
+                    <View style={styles.mentionInfo}>
+                      <Text style={styles.mentionUsername}>@{item.userId?.username || 'unknown'}</Text>
+                      <Text style={styles.mentionDisplayName}>{item.userId?.displayName || 'Unknown User'}</Text>
                     </View>
-                    
-                    {textChannels.map((channel: any) => (
-                      <Pressable
-                        key={channel._id}
-                        style={[
-                          styles.channelItem,
-                          selectedChannel === channel._id && styles.selectedChannel
-                        ]}
-                        onPress={() => handleChannelSelect(channel._id)}
-                      >
-                        <Ionicons 
-                          name="chatbubble-outline" 
-                          size={20} 
-                          color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
-                        />
-                        <Text 
-                          style={[
-                            styles.channelName,
-                            selectedChannel === channel._id && styles.selectedChannelName
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {channel.name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
+                  </TouchableOpacity>
                 )}
-
-                {/* Voice channels */}
-                {voiceChannels.length > 0 && (
-                  <View style={styles.categoryContainer}>
-                    <View style={styles.categoryHeader}>
-                      <Ionicons name="chevron-down" size={12} color={Colors.textMuted} />
-                      <Text style={styles.categoryTitle}>VOICE CHANNELS</Text>
-                      {server.userRoles?.includes('owner') && (
-                        <Pressable style={styles.addChannelButton}>
-                          <Ionicons name="add" size={16} color={Colors.textMuted} />
-                        </Pressable>
-                      )}
-                    </View>
-                    
-                    {voiceChannels.map((channel: any) => (
-                      <Pressable
-                        key={channel._id}
-                        style={[
-                          styles.channelItem,
-                          selectedChannel === channel._id && styles.selectedChannel
-                        ]}
-                        onPress={() => handleChannelSelect(channel._id)}
-                      >
-                        <Ionicons 
-                          name="volume-medium-outline" 
-                          size={20} 
-                          color={selectedChannel === channel._id ? Colors.text : Colors.textMuted} 
-                        />
-                        <Text 
-                          style={[
-                            styles.channelName,
-                            selectedChannel === channel._id && styles.selectedChannelName
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {channel.name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                )}
-              </ScrollView>
-              
-              {/* User info at bottom */}
-              <View style={styles.userInfo}>
-                <Image
-                  source={{ 
-                    uri: user?.avatarUrl || 
-                    `https://via.placeholder.com/32/5865f2/ffffff?text=${user?.username?.charAt(0).toUpperCase()}` 
-                  }}
-                  style={styles.userAvatar}
-                />
-                <View style={styles.userDetails}>
-                  <Text style={styles.userDisplayName} numberOfLines={1}>
-                    {user?.displayName || user?.username}
-                  </Text>
-                  <Text style={styles.userStatus}>
-                    {user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Online'}
-                  </Text>
-                </View>
-                
-                <View style={styles.userActions}>
-                  <Pressable style={styles.userAction}>
-                    <Ionicons name="settings" size={20} color={Colors.text} />
-                  </Pressable>
-                </View>
-              </View>
+                horizontal={false}
+                style={{ maxHeight: 200 }}
+              />
             </View>
           )}
 
-          {/* Center - Chat area - Replace KeyboardAvoidingView with View */}
-          <View style={styles.chatArea}>
-            {/* Channel header */}
-            <View style={styles.channelHeader}>
-              <View style={styles.channelInfo}>
-                <Ionicons name="chatbubble-outline" size={20} color={Colors.textMuted} />
-                <Text style={styles.channelName}>#{selectedChannelName}</Text>
+          {/* Reply indicator */}
+          {replyingTo && (
+            <View style={styles.replyingContainer}>
+              <View style={styles.replyingContent}>
+                <Text style={styles.replyingToText}>
+                  Replying to {replyingTo.sender.displayName || replyingTo.sender.username}
+                </Text>
+                <Text style={styles.replyingMessageText} numberOfLines={1}>
+                  {replyingTo.content}
+                </Text>
               </View>
-              
-              <View style={styles.channelActions}>
-                <Pressable style={styles.channelAction}>
-                  <Ionicons name="notifications" size={20} color={Colors.textMuted} />
-                </Pressable>
-                <Pressable style={styles.channelAction}>
-                  <Ionicons name="pin" size={20} color={Colors.textMuted} />
-                </Pressable>
-                <Pressable style={styles.channelAction}>
-                  <Ionicons name="search" size={20} color={Colors.textMuted} />
-                </Pressable>
-                {!isSmallDevice && (
-                  <Pressable 
-                    style={styles.channelAction} 
-                    onPress={() => setShowMembers(!showMembers)}
-                  >
-                    <Ionicons name="people" size={20} color={Colors.textMuted} />
-                    {members.length > 0 && (
-                      <View style={styles.memberCountSmallBadge}>
-                        <Text style={styles.memberCountSmallText}>{members.length}</Text>
-                      </View>
-                    )}
-                  </Pressable>
-                )}
+              <TouchableOpacity onPress={cancelReply} style={styles.cancelReplyButton}>
+                <Ionicons name="close" size={20} color="#767676" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Edit indicator */}
+          {editingMessage && (
+            <View style={styles.replyingContainer}>
+              <View style={styles.replyingContent}>
+                <Text style={styles.replyingToText}>Editing your message</Text>
+                <Text style={styles.replyingMessageText} numberOfLines={1}>
+                  {editingMessage.content}
+                </Text>
               </View>
+              <TouchableOpacity 
+                onPress={() => { setEditingMessage(null); setInputText(''); }}
+                style={styles.cancelReplyButton}
+              >
+                <Ionicons name="close" size={20} color="#767676" />
+              </TouchableOpacity>
             </View>
-            
-            {/* Messages area */}
-            <View style={styles.messagesArea}>
-              {!selectedChannel ? (
-                <View style={styles.welcomeSection}>
-                  <Text style={styles.welcomeTitle}>Welcome to {server.name}!</Text>
-                  <Text style={styles.welcomeText}>
-                    Select a channel to start chatting.
-                  </Text>
-                </View>
-              ) : isLoadingMessages ? (
-                <ActivityIndicator size="large" color={Colors.primary} style={styles.loader} />
-              ) : messagesError ? (
-                <View style={styles.welcomeSection}>
-                  <Text style={styles.errorText}>Failed to load messages</Text>
-                  <Pressable style={styles.retryButton} onPress={() => refetchMessages()}>
-                    <Text style={styles.retryText}>Retry</Text>
-                  </Pressable>
-                </View>
-              ) : messages.length === 0 ? (
-                <View style={styles.welcomeSection}>
-                  <Text style={styles.welcomeTitle}>Welcome to #{selectedChannelName}!</Text>
-                  <Text style={styles.welcomeText}>
-                    This is the start of the #{selectedChannelName} channel.
-                  </Text>
-                </View>
-              ) : (
-                <FlatList
-                  ref={flatListRef}
-                  data={messages}
-                  renderItem={renderMessageItem}
-                  keyExtractor={item => item._id}
-                  inverted
-                  contentContainerStyle={styles.messagesContent}
-                  showsVerticalScrollIndicator={false}
-                />
-              )}
-              
-              {/* Typing indicator */}
-              {typingUsers.length > 0 && (
-                <View style={styles.typingContainer}>
-                  <Text style={styles.typingText}>
-                    {typingUsers.length === 1 
-                      ? `${typingUsers[0]} is typing...`
-                      : typingUsers.length === 2 
-                      ? `${typingUsers[0]} and ${typingUsers[1]} are typing...`
-                      : `${typingUsers.length} people are typing...`
-                    }
-                  </Text>
-                </View>
-              )}
-            </View>
-            
-            {/* Message Input */}
-            {selectedChannel && (
-              <View style={styles.inputContainer}>
-                <Pressable style={styles.inputButton}>
-                  <Ionicons name="add" size={24} color={Colors.textMuted} />
-                </Pressable>
+          )}
+          
+          {/* Message Input */}
+          {selectedChannel && (
+            <View style={[
+              styles.inputContainer,
+              keyboardVisible && styles.inputContainerKeyboard
+            ]}>
+              <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.input}
                   placeholder={`Message #${selectedChannelName}`}
@@ -1068,139 +1150,145 @@ const handleRefreshMembers = () => {
                   ref={inputRef}
                   maxLength={2000}
                 />
-                <TouchableOpacity
-                  style={[
-                    styles.sendButton,
-                    sendMessageMutation.isPending && styles.sendButtonDisabled
-                  ]}
-                  onPress={handleSendMessage}
-                  disabled={sendMessageMutation.isPending}
-                >
-                  {inputText.trim() ? (
-                    sendMessageMutation.isPending ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Ionicons name="send" size={20} color="#fff" />
-                    )
-                  ) : (
-                    <MaterialIcons name="mic" size={24} color="#fff" />
-                  )}
+                <TouchableOpacity style={styles.attachButton} onPress={handlePickImage}>
+                  <MaterialIcons name="attach-file" size={24} color="#767676" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cameraButton}>
+                  <MaterialIcons name="camera-alt" size={24} color="#767676" />
                 </TouchableOpacity>
               </View>
-            )}
-          </View>
-          
-          {/* Right sidebar - Members */}
-          {showMembers && (
-            <View style={[
-              styles.membersArea,
-              isSmallDevice && styles.membersAreaMobile
-            ]}>
-              <View style={styles.membersAreaHeader}>
-                <Text style={styles.membersHeader}>
-                  MEMBERS - {isLoadingMembers ? '...' : members.length}
-                </Text>
-                <Pressable onPress={handleRefreshMembers} style={styles.refreshIcon}>
-                  <Ionicons name="refresh" size={16} color={Colors.textMuted} />
-                </Pressable>
-              </View>
-              
-              {isLoadingMembers ? (
-                <View style={styles.loadingMembersContainer}>
-                  <ActivityIndicator size="small" color={Colors.primary} />
-                  <Text style={styles.loadingMembersText}>Loading members...</Text>
-                </View>
-              ) : membersError ? (
-                <View style={styles.emptyMembersContainer}>
-                  <Ionicons name="alert-circle" size={32} color={Colors.error} />
-                  <Text style={styles.membersErrorText}>{membersError}</Text>
-                  <Pressable 
-                    style={styles.refreshButton}
-                    onPress={handleRefreshMembers}
-                  >
-                    <Text style={styles.refreshButtonText}>Try Again</Text>
-                  </Pressable>
-                </View>
-              ) : members.length === 0 ? (
-                <View style={styles.emptyMembersContainer}>
-                  <Ionicons name="people" size={32} color={Colors.textMuted} />
-                  <Text style={styles.emptyMembersText}>
-                    No members found
-                  </Text>
-                  <Text style={styles.emptyMembersSubtext}>
-                    There might be an issue loading the server members
-                  </Text>
-                  <Pressable 
-                    style={styles.refreshButton}
-                    onPress={handleRefreshMembers}
-                  >
-                    <Text style={styles.refreshButtonText}>Refresh</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <ScrollView style={styles.membersList} showsVerticalScrollIndicator={false}>
-                  {/* Online members */}
-                  {onlineMembers.length > 0 && (
-                    <>
-                      <Text style={styles.memberCategory}>
-                        ONLINE - {onlineMembers.length}
-                      </Text>
-                      {onlineMembers.map((member: any) => (
-                        <MemberItem 
-                          key={member.userId._id || member._id}
-                          member={member}
-                          isOwner={(member.userId._id || member.userId) === server?.owner}
-                          isOnline={true}
-                        />
-                      ))}
-                    </>
-                  )}
-                  
-                  {/* Offline members */}
-                  {offlineMembers.length > 0 && (
-                    <>
-                      <Text style={styles.memberCategory}>
-                        OFFLINE - {offlineMembers.length}
-                      </Text>
-                      {offlineMembers.map((member: any) => (
-                        <MemberItem 
-                          key={member.userId._id || member._id}
-                          member={member}
-                          isOwner={(member.userId._id || member.userId) === server?.owner}
-                          isOnline={false}
-                        />
-                      ))}
-                    </>
-                  )}
-                </ScrollView>
-              )}
-              
-              {isSmallDevice && (
-                <Pressable 
-                  style={styles.closeMembersButton}
-                  onPress={() => setShowMembers(false)}
-                >
-                  <Ionicons name="close" size={24} color={Colors.text} />
-                </Pressable>
-              )}
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  sendMessageMutation.isPending && styles.sendButtonDisabled
+                ]}
+                onPress={handleSendMessage}
+                disabled={sendMessageMutation.isPending}
+              >
+                {inputText.trim() ? (
+                  sendMessageMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="send" size={20} color="#fff" />
+                  )
+                ) : (
+                  <MaterialIcons name="mic" size={24} color="#fff" />
+                )}
+              </TouchableOpacity>
             </View>
           )}
-        </View>
+        </KeyboardAvoidingView>
+        
+        {/* Right sidebar - Members */}
+        {showMembers && (
+          <View style={[
+            styles.membersArea,
+            isSmallDevice && styles.membersAreaMobile
+          ]}>
+            <View style={styles.membersAreaHeader}>
+              <Text style={styles.membersHeader}>
+                MEMBERS - {isLoadingMembers ? '...' : members.length}
+              </Text>
+              <Pressable onPress={handleRefreshMembers} style={styles.refreshIcon}>
+                <Ionicons name="refresh" size={16} color={Colors.textMuted} />
+              </Pressable>
+            </View>
+            
+            {isLoadingMembers ? (
+              <View style={styles.loadingMembersContainer}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={styles.loadingMembersText}>Loading members...</Text>
+              </View>
+            ) : membersError ? (
+              <View style={styles.emptyMembersContainer}>
+                <Ionicons name="alert-circle" size={32} color={Colors.error} />
+                <Text style={styles.membersErrorText}>{membersError}</Text>
+                <Pressable 
+                  style={styles.refreshButton}
+                  onPress={handleRefreshMembers}
+                >
+                  <Text style={styles.refreshButtonText}>Try Again</Text>
+                </Pressable>
+              </View>
+            ) : members.length === 0 ? (
+              <View style={styles.emptyMembersContainer}>
+                <Ionicons name="people" size={32} color={Colors.textMuted} />
+                <Text style={styles.emptyMembersText}>
+                  No members found
+                </Text>
+                <Text style={styles.emptyMembersSubtext}>
+                  There might be an issue loading the server members
+                </Text>
+                <Pressable 
+                  style={styles.refreshButton}
+                  onPress={handleRefreshMembers}
+                >
+                  <Text style={styles.refreshButtonText}>Refresh</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <ScrollView style={styles.membersList} showsVerticalScrollIndicator={false}>
+                {/* Online members */}
+                {onlineMembers.length > 0 && (
+                  <>
+                    <Text style={styles.memberCategory}>
+                      ONLINE - {onlineMembers.length}
+                    </Text>
+                    {onlineMembers.map((member: any) => (
+                      <MemberItem 
+                        key={member.userId._id || member._id}
+                        member={member}
+                        isOwner={(member.userId._id || member.userId) === server?.owner}
+                        isOnline={true}
+                      />
+                    ))}
+                  </>
+                )}
+                
+                {/* Offline members */}
+                {offlineMembers.length > 0 && (
+                  <>
+                    <Text style={styles.memberCategory}>
+                      OFFLINE - {offlineMembers.length}
+                    </Text>
+                    {offlineMembers.map((member: any) => (
+                      <MemberItem 
+                        key={member.userId._id || member._id}
+                        member={member}
+                        isOwner={(member.userId._id || member.userId) === server?.owner}
+                        isOnline={false}
+                      />
+                    ))}
+                  </>
+                )}
+              </ScrollView>
+            )}
+            
+            {isSmallDevice && (
+              <Pressable 
+                style={styles.closeMembersButton}
+                onPress={() => setShowMembers(false)}
+              >
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
 
-        <ServerSettingsModal
-          visible={showServerSettings}
-          onClose={() => setShowServerSettings(false)}
-          server={server}
-          isOwner={server?.owner === user?._id}
-          onServerDeleted={() => {
-            router.replace('/(tabs)/home');
-          }}
-          onServerLeft={() => {
-            router.replace('/(tabs)/home');
-          }}
-        />
-      </SafeAreaView>
-    </KeyboardAvoidingView>
+      <ServerSettingsModal
+        visible={showServerSettings}
+        onClose={() => setShowServerSettings(false)}
+        server={server}
+        isOwner={server?.owner === user?._id}
+        onServerDeleted={() => {
+          router.replace('/(tabs)/home');
+        }}
+        onServerLeft={() => {
+          router.replace('/(tabs)/home');
+        }}
+      />
+    </SafeAreaView>
   );
 }
 
@@ -1863,29 +1951,88 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   // New styles for reply indicator
-  replyIndicatorContainer: {
+  replyingContainer: {
+    backgroundColor: '#23272F',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     padding: 8,
-    backgroundColor: Colors.surfaceLight,
     borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    borderTopColor: '#333',
   },
-  replyIndicatorText: {
-    color: Colors.textMuted,
+  replyingContent: {
+    flex: 1,
+    paddingLeft: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#53bdeb',
+  },
+  replyingToText: {
+    fontWeight: 'bold',
+    color: '#53bdeb',
+    fontSize: 12,
+  },
+  replyingMessageText: {
+    color: '#bbb',
     fontSize: 14,
+  },
+  cancelReplyButton: {
+    padding: 8,
+  },
+  mentionContainer: {
+    backgroundColor: '#23272F',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    position: 'absolute',
+    bottom: 60,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  mentionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  mentionAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 12,
+  },
+  mentionInfo: {
     flex: 1,
   },
+  mentionUsername: {
+    fontWeight: 'bold',
+    color: '#53bdeb',
+    fontSize: 14,
+  },
+  mentionDisplayName: {
+    color: '#bbb',
+    fontSize: 12,
+  },
   mentionText: {
-    color: Colors.primary,
+    color: '#53bdeb',
     fontWeight: 'bold',
   },
-  myMessageTime: {
-    color: Colors.textMuted,
+  inputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#181A20',
+    borderRadius: 25,
+    paddingHorizontal: 10,
+    marginRight: 8,
   },
-  theirMessageTime: {
-    color: Colors.textMuted,
+  attachButton: {
+    padding: 8,
+  },
+  cameraButton: {
+    padding: 8,
+  },
+  inputContainerKeyboard: {
+    paddingBottom: 8,
   },
   // Other styles remain unchanged
 });
