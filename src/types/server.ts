@@ -48,4 +48,20 @@ export interface Server {
   roles: Role[];
   memberCount?: number;
   userRoles?: string[];
+  members: Member[];
+  invites?: InviteCode[];
+  createdAt: string;
+  updatedAt: string;
+  isPublic?: boolean;
+  isArchived?: boolean;
+   replyTo?: {
+    _id: string;
+    content: string;
+    sender: {
+      _id: string;
+      username: string;
+      displayName?: string;
+      avatarUrl?: string;
+    };
+  };
 }

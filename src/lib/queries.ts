@@ -394,18 +394,23 @@ export const useChannelMessages = (serverId: string, channelId: string) => {
 
 export const useSendChannelMessage = () => {
   const queryClient = useQueryClient();
-  
   return useMutation({
-    mutationFn: ({ serverId, channelId, content, mentions = [] }: {
-      serverId: string;
-      channelId: string;
-      content: string;
+    mutationFn: ({ 
+      serverId, 
+      channelId, 
+      content, 
+      mentions, 
+      replyTo 
+    }: { 
+      serverId: string; 
+      channelId: string; 
+      content: string; 
       mentions?: string[];
-    }) => messageApi.sendChannelMessage(serverId, channelId, content, mentions),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ 
-        queryKey: ['channelMessages', variables.serverId, variables.channelId] 
-      });
+      replyTo?: string; // Add this line
+    }) =>
+      messageApi.sendChannelMessage(serverId, channelId, content, mentions, replyTo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['channelMessages'] });
     },
   });
 };

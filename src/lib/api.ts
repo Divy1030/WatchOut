@@ -405,8 +405,18 @@ export const messageApi = {
   },
 
   // Send message to channel
-  sendChannelMessage: async (serverId: string, channelId: string, content: string, mentions: string[] = []) => {
-    const response = await api.post(`/messages/channels/${serverId}/${channelId}`, { content, mentions });
+  sendChannelMessage: async (
+    serverId: string, 
+    channelId: string, 
+    content: string, 
+    mentions?: string[], 
+    replyTo?: string // Add this parameter
+  ) => {
+    const response = await api.post(`/servers/${serverId}/channels/${channelId}/messages`, {
+      content,
+      mentions,
+      replyTo, // Include in the request body
+    });
     return response.data;
   },
 

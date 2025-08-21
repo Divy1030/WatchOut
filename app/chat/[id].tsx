@@ -19,9 +19,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
 import {
   useAddReaction,
+  useDeleteMessage,
   useDirectMessages,
   useEditMessage,
   useFriendsList,
+  useRemoveReaction,
   useSendDirectMessage
 } from '../../src/lib/queries';
 import {
@@ -79,6 +81,8 @@ export default function ChatScreen() {
   const sendMessageMutation = useSendDirectMessage();
   const addReactionMutation = useAddReaction();
   const editMessageMutation = useEditMessage();
+  const removeReactionMutation = useRemoveReaction();
+  const deleteMessageMutation = useDeleteMessage();
 
   // Find the friend details based on the ID
   const friend = friendsData?.data?.friends?.find(
@@ -277,37 +281,79 @@ export default function ChatScreen() {
 
   // Image picker handler
   const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      alert('Permission to access media library is required!');
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
       allowsEditing: true,
       quality: 0.8,
-      base64: true, // <-- Add this
     });
+
+    console.log('ImagePicker result:', result);
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const asset = result.assets[0];
-      // asset.base64 will be available
-      if (!asset.base64) {
-        alert('Failed to get base64 data');
+      const uri = asset.uri;
+      const fileName = asset.fileName || uri.split('/').pop() || 'image.jpg';
+      // Use asset.mimeType if available, else fallback to 'image/jpeg'
+      const fileType = asset.mimeType || 'image/jpeg';
+
+      const formData = new FormData();
+      formData.append('file', {
+        uri,
+        name: fileName,
+        type: fileType, // <-- This must be a valid MIME type!
+      } as any);
+
+      const token = await AsyncStorage.getItem('accessToken');
+      console.log('Uploading image:', { uri, fileName, fileType });
+
+      const uploadRes = await fetch(`${API_URL}/api/v1/messages/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const uploadText = await uploadRes.text();
+      console.log('Upload response:', uploadRes.status, uploadText);
+
+      if (uploadRes.status !== 200) {
+        alert('Upload failed');
         return;
       }
 
-      const attachment = {
-        data: asset.base64,
-        type: 'image',
-        name: asset.fileName || 'image.jpg',
-      };
+      const uploadData = JSON.parse(uploadText);
+      if (!uploadData.data || !uploadData.data.attachment || !uploadData.data.attachment.url) {
+        alert('Upload failed');
+        return;
+      }
+      const attachment = uploadData.data.attachment;
 
-      // Send DM with only the image
-      const sendRes = await messageApi.sendDirectMessageWithAttachments(id as string, {
-        content: '', // No text
+      // 2. Send DM with the uploaded image as attachment
+      await messageApi.sendDirectMessageWithAttachments(id as string, {
+        content: '', // Allow image-only messages
         attachments: [attachment],
       });
-      console.log('Send DM with attachment response:', sendRes);
 
       setInputText('');
       refetchMessages();
     }
+  };
+
+  // Delete message handler
+  const handleDeleteMessage = (messageId: string) => {
+    deleteMessageMutation.mutate(messageId, {
+      onSuccess: () => {
+        refetchMessages();
+      }
+    });
   };
 
   if (isLoadingMessages) {
@@ -336,335 +382,366 @@ export default function ChatScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </Pressable>
-        <View style={styles.headerInfo}>
-          {friendDetails.avatarUrl ? (
-            <Image source={{ uri: friendDetails.avatarUrl }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, { backgroundColor: '#128C7E', justifyContent: 'center', alignItems: 'center' }]}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>
-                {(friendDetails.displayName || friendDetails.username)?.charAt(0).toUpperCase()}
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      // keyboardVerticalOffset={50} // Adjust if your header is taller/shorter
+    >
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </Pressable>
+          <View style={styles.headerInfo}>
+            {friendDetails.avatarUrl ? (
+              <Image source={{ uri: friendDetails.avatarUrl }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, { backgroundColor: '#128C7E', justifyContent: 'center', alignItems: 'center' }]}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                  {(friendDetails.displayName || friendDetails.username)?.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>
+                {friendDetails.displayName || friendDetails.username}
               </Text>
-            </View>
-          )}
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerTitle}>
-              {friendDetails.displayName || friendDetails.username}
-            </Text>
-            <View style={styles.row}>
-              <View
-                style={[
-                  styles.statusDot,
-                  {
-                    backgroundColor:
-                      friendDetails.status === 'online' ? Colors.secondary :
-                        friendDetails.status === 'idle' ? '#ffa500' :
-                          friendDetails.status === 'dnd' ? Colors.error :
-                            Colors.textMuted
-                  }
-                ]}
-              />
-              <Text style={styles.headerSubtitle}>
-                {friendDetails.status === 'online' ? 'online' : 'last seen recently'}
-              </Text>
-            </View>
-          </View>
-        </View>
-        <View style={styles.row}>
-          <TouchableOpacity style={styles.headerButton}>
-            <Ionicons name="call" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerButton}>
-            <Ionicons name="videocam" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerButton}>
-            <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Messages List */}
-      <View style={styles.messagesContainer}>
-        {messages.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              No messages yet. Start the conversation!
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={messages}
-            renderItem={({ item }) => {
-              const isMine = item.sender._id === user?._id;
-              const senderName = item.sender.displayName || item.sender.username;
-              return (
-                <Pressable
+              <View style={styles.row}>
+                <View
                   style={[
-                    styles.messageContainer,
-                    isMine ? styles.myMessage : styles.theirMessage
+                    styles.statusDot,
+                    {
+                      backgroundColor:
+                        friendDetails.status === 'online' ? Colors.secondary :
+                          friendDetails.status === 'idle' ? '#ffa500' :
+                            friendDetails.status === 'dnd' ? Colors.error :
+                              Colors.textMuted
+                    }
                   ]}
-                  onLongPress={() => setShowReactionBar(item._id)}
-                >
-                  <View style={[
-                    styles.messageBubble,
-                    isMine ? styles.myMessageBubble : styles.theirMessageBubble
-                  ]}>
-                    {/* Reply indicator if this message is a reply */}
-                    {item.replyTo && item.replyTo.sender && (
-                      <View style={styles.replyContainer}>
-                        <Text style={styles.replyText}>
-                          Replying to {item.replyTo.sender.displayName || item.replyTo.sender.username}
-                        </Text>
-                        <Text style={styles.replyContent} numberOfLines={1}>
-                          {item.replyTo.content}
-                        </Text>
-                      </View>
-                    )}
-                    {!isMine && (
-                      <Text style={styles.senderName}>{senderName}</Text>
-                    )}
-                    <Text style={[
-                      styles.messageText,
-                      isMine ? styles.myMessageText : styles.theirMessageText
+                />
+                <Text style={styles.headerSubtitle}>
+                  {friendDetails.status === 'online' ? 'online' : 'last seen recently'}
+                </Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.row}>
+            <TouchableOpacity style={styles.headerButton}>
+              <Ionicons name="call" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton}>
+              <Ionicons name="videocam" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton}>
+              <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Messages List */}
+        <View style={styles.messagesContainer}>
+          {messages.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                No messages yet. Start the conversation!
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={messages}
+              renderItem={({ item }) => {
+                const isMine = item.sender._id === user?._id;
+                const senderName = item.sender.displayName || item.sender.username;
+                return (
+                  <Pressable
+                    style={[
+                      styles.messageContainer,
+                      isMine ? styles.myMessage : styles.theirMessage
+                    ]}
+                    onLongPress={() => setShowReactionBar(item._id)}
+                  >
+                    <View style={[
+                      styles.messageBubble,
+                      isMine ? styles.myMessageBubble : styles.theirMessageBubble
                     ]}>
-                      {item.content.split(/(\s@[a-zA-Z0-9_]+)/).map((part, index) => {
-                        if (part.match(/\s@[a-zA-Z0-9_]+/)) {
-                          return (
-                            <Text key={index} style={styles.mentionText}>
-                              {part}
-                            </Text>
-                          );
-                        }
-                        return <Text key={index}>{part}</Text>;
-                      })}
-                    </Text>
-                    <View style={styles.messageTimeWrapper}>
-                      <Text style={[
-                        styles.messageTime,
-                        isMine ? styles.myMessageTime : styles.theirMessageTime
-                      ]}>
-                        {new Date(item.createdAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                        {item.isEdited && <Text style={styles.editedText}> (edited)</Text>}
-                      </Text>
+                      {/* Reply indicator if this message is a reply */}
+                      {item.replyTo && item.replyTo.sender && (
+                        <View style={styles.replyContainer}>
+                          <Text style={styles.replyText}>
+                            Replying to {item.replyTo.sender.displayName || item.replyTo.sender.username}
+                          </Text>
+                          <Text style={styles.replyContent} numberOfLines={1}>
+                            {item.replyTo.content}
+                          </Text>
+                        </View>
+                      )}
+                      {!isMine && (
+                        <Text style={styles.senderName}>{senderName}</Text>
+                      )}
+
+                      {/* Attachments (images) */}
+                      {item.attachments && item.attachments.length > 0 && (
+                        <View style={{ marginVertical: 4 }}>
+                          {item.attachments.map((att, idx) =>
+                            att.type === 'image' && att.url ? (
+                              <Image
+                                key={idx}
+                                source={{ uri: att.url }}
+                                style={{ width: 180, height: 180, borderRadius: 8, marginBottom: 4 }}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <TouchableOpacity key={idx} onPress={() => {/* open file */}}>
+                                <Text style={{ color: '#53bdeb' }}>{att.name}</Text>
+                              </TouchableOpacity>
+                            )
+                          )}
+                        </View>
+                      )}
+
+                      {/* Only render text if not blank */}
+                      {item.content && item.content.trim().length > 0 && (
+                        <Text style={[
+                          styles.messageText,
+                          isMine ? styles.myMessageText : styles.theirMessageText
+                        ]}>
+                          {item.content.split(/(\s@[a-zA-Z0-9_]+)/).map((part, index) => {
+                            if (part.match(/\s@[a-zA-Z0-9_]+/)) {
+                              return (
+                                <Text key={index} style={styles.mentionText}>
+                                  {part}
+                                </Text>
+                              );
+                            }
+                            return <Text key={index}>{part}</Text>;
+                          })}
+                        </Text>
+                      )}
+                      <View style={styles.messageTimeWrapper}>
+                        <Text style={[
+                          styles.messageTime,
+                          isMine ? styles.myMessageTime : styles.theirMessageTime
+                        ]}>
+                          {new Date(item.createdAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                          {item.isEdited && <Text style={styles.editedText}> (edited)</Text>}
+                        </Text>
+                        {isMine && (
+                          <MaterialCommunityIcons
+                            name="check-all"
+                            size={14}
+                            color={item.read ? '#53bdeb' : '#7D7D7D'}
+                            style={{ marginLeft: 4 }}
+                          />
+                        )}
+                      </View>
+                    </View>
+                    {/* Message actions row */}
+                    <View style={styles.messageActionsRow}>
+                      <TouchableOpacity onPress={() => handleReply(item)}>
+                        <Ionicons name="return-up-back" size={18} color="#53bdeb" />
+                      </TouchableOpacity>
                       {isMine && (
-                        <MaterialCommunityIcons
-                          name="check-all"
-                          size={14}
-                          color={item.read ? '#53bdeb' : '#7D7D7D'}
-                          style={{ marginLeft: 4 }}
-                        />
+                        <>
+                          <TouchableOpacity
+                            onPress={() => {
+                              setEditingMessage(item);
+                              setInputText(item.content);
+                              inputRef.current?.focus();
+                            }}>
+                            <MaterialIcons name="edit" size={18} color="#bbb" />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => handleDeleteMessage(item._id)}>
+                            <MaterialIcons name="delete" size={18} color="#e74c3c" />
+                          </TouchableOpacity>
+                        </>
                       )}
                     </View>
-                  </View>
-                  {/* Message actions row */}
-                  <View style={styles.messageActionsRow}>
-                    <TouchableOpacity onPress={() => handleReply(item)}>
-                      <Ionicons name="return-up-back" size={18} color="#53bdeb" />
-                    </TouchableOpacity>
-                    {isMine && (
-                      <TouchableOpacity onPress={() => {
-                        setEditingMessage(item);
-                        setInputText(item.content);
-                        inputRef.current?.focus();
-                      }}>
-                        <MaterialIcons name="edit" size={18} color="#bbb" />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                  {/* Emoji Reaction Bar */}
-                  {showReactionBar === item._id && (
-                    <View style={styles.reactionBar}>
-                      {EMOJI_REACTIONS.map((emoji) => (
+                    {/* Emoji Reaction Bar */}
+                    {showReactionBar === item._id && (
+                      <View style={styles.reactionBar}>
+                        {EMOJI_REACTIONS.map((emoji) => {
+                          // Check if the current user has reacted with this emoji
+                          const userReacted = item.reactions?.find(
+                            (r) => r.emoji === emoji && r.users.some((u: any) => u._id === user?._id)
+                          );
+                          return (
+                            <TouchableOpacity
+                              key={emoji}
+                              style={[
+                                styles.reactionButton,
+                                userReacted && styles.reactionSelected // Highlight if user reacted
+                              ]}
+                              onPress={() => {
+                                if (userReacted) {
+                                  // Remove reaction
+                                  removeReactionMutation.mutate({ messageId: item._id, emoji });
+                                } else {
+                                  // Add reaction
+                                  addReactionMutation.mutate({ messageId: item._id, emoji });
+                                }
+                                setShowReactionBar(null);
+                              }}
+                            >
+                              <Text style={styles.reactionEmoji}>{emoji}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
                         <TouchableOpacity
-                          key={emoji}
-                          style={styles.reactionButton}
-                          onPress={() => {
-                            addReactionMutation.mutate({ messageId: item._id, emoji });
+                          style={styles.reactionCloseButton}
+                          onPress={() => setShowReactionBar(null)}
+                        >
+                          <Ionicons name="close" size={20} color="#fff" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            await Clipboard.setStringAsync(item.content);
                             setShowReactionBar(null);
                           }}
                         >
-                          <Text style={styles.reactionEmoji}>{emoji}</Text>
+                          <Ionicons name="copy-outline" size={20} color="#fff" />
                         </TouchableOpacity>
-                      ))}
-                      <TouchableOpacity
-                        style={styles.reactionCloseButton}
-                        onPress={() => setShowReactionBar(null)}
-                      >
-                        <Ionicons name="close" size={20} color="#fff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={async () => {
-                          await Clipboard.setStringAsync(item.content);
-                          setShowReactionBar(null);
-                        }}
-                      >
-                        <Ionicons name="copy-outline" size={20} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                  {/* Reactions display */}
-                  {item.reactions && item.reactions.length > 0 && (
-                    <View style={styles.reactionsRow}>
-                      {item.reactions.map((reaction, idx) => (
-                        <TouchableOpacity
-                          key={reaction.emoji + idx}
-                          style={[
-                            styles.reactionDisplay,
-                            reaction.users.some((u: any) => u._id === user?._id) && styles.reactionSelected
-                          ]}
-                          onPress={() => {
-                            // Remove reaction if already reacted, else add
-                            if (reaction.users.some((u: any) => u._id === user?._id)) {
-                              // Remove reaction
-                              addReactionMutation.mutate({ messageId: item._id, emoji: reaction.emoji });
-                            } else {
-                              addReactionMutation.mutate({ messageId: item._id, emoji: reaction.emoji });
-                            }
-                          }}
-                        >
-                          <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
-                          <Text style={styles.reactionCount}>{reaction.users.length}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                  {/* Attachments display */}
-                  {item.attachments && item.attachments.length > 0 && (
-                    <View style={{ marginVertical: 4 }}>
-                      {item.attachments.map((att, idx) =>
-                        att.type === 'image' && att.data ? (
-                          <Image
-                            key={idx}
-                            source={{ uri: `data:image/jpeg;base64,${att.data}` }}
-                            style={{ width: 180, height: 180, borderRadius: 8, marginBottom: 4 }}
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <TouchableOpacity key={idx} onPress={() => {/* open file */}}>
-                            <Text style={{ color: '#53bdeb' }}>{att.name}</Text>
+                      </View>
+                    )}
+                    {/* Reactions display */}
+                    {item.reactions && item.reactions.length > 0 && (
+                      <View style={styles.reactionsRow}>
+                        {item.reactions.map((reaction, idx) => (
+                          <TouchableOpacity
+                            key={reaction.emoji + idx}
+                            style={[
+                              styles.reactionDisplay,
+                              reaction.users.some((u: any) => u._id === user?._id) && styles.reactionSelected
+                            ]}
+                            onPress={() => {
+                              if (reaction.users.some((u: any) => u._id === user?._id)) {
+                                removeReactionMutation.mutate({ messageId: item._id, emoji: reaction.emoji });
+                              } else {
+                                addReactionMutation.mutate({ messageId: item._id, emoji: reaction.emoji });
+                              }
+                            }}
+                          >
+                            <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+                            <Text style={styles.reactionCount}>{reaction.users.length}</Text>
                           </TouchableOpacity>
-                        )
-                      )}
-                    </View>
-                  )}
-                </Pressable>
-              );
-            }}
-            keyExtractor={(item) => item._id}
-            inverted
-            contentContainerStyle={styles.messagesList}
-            showsVerticalScrollIndicator={false}
-            removeClippedSubviews={false}
-          />
-        )}
-      </View>
-
-      {/* Typing indicator */}
-      {isTyping && (
-        <View style={styles.typingContainer}>
-          <Text style={styles.typingText}>
-            {friendDetails.displayName || friendDetails.username} is typing...
-          </Text>
-        </View>
-      )}
-
-      {/* Mention suggestions */}
-      {mentionQuery !== null && mentionResults.length > 0 && (
-        <View style={styles.mentionContainer}>
-          <FlatList
-            data={mentionResults}
-            keyExtractor={(item) => item._id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.mentionItem}
-                onPress={() => handleMentionSelect(item)}
-              >
-                <Text style={styles.mentionUsername}>@{item.username}</Text>
-                <Text style={styles.mentionDisplayName}>{item.displayName}</Text>
-              </TouchableOpacity>
-            )}
-            horizontal={false}
-            style={{ maxHeight: 150 }}
-          />
-        </View>
-      )}
-
-      {/* Reply indicator */}
-      {replyingTo && (
-        <View style={styles.replyingContainer}>
-          <View style={styles.replyingContent}>
-            <Text style={styles.replyingToText}>
-              Replying to {replyingTo.sender.displayName || replyingTo.sender.username}
-            </Text>
-            <Text style={styles.replyingMessageText} numberOfLines={1}>
-              {replyingTo.content}
-            </Text>
-          </View>
-          <TouchableOpacity onPress={cancelReply} style={styles.cancelReplyButton}>
-            <Ionicons name="close" size={20} color="#767676" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Input area wrapped in KeyboardAvoidingView */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={80} // Adjust this to match your header height
-      >
-        <View style={[
-          styles.inputContainer,
-          keyboardVisible && styles.inputContainerKeyboard
-        ]}>
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.input}
-              placeholder="Message"
-              placeholderTextColor={Colors.textMuted}
-              value={inputText}
-              onChangeText={(text) => {
-                setInputText(text);
-                handleTyping();
+                        ))}
+                      </View>
+                    )}
+                  </Pressable>
+                );
               }}
-              multiline
-              ref={inputRef}
-              maxLength={2000}
+              keyExtractor={(item) => item._id}
+              inverted
+              contentContainerStyle={styles.messagesList}
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={false}
             />
-            <TouchableOpacity style={styles.attachButton} onPress={handlePickImage}>
-              <MaterialIcons name="attach-file" size={24} color="#767676" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cameraButton}>
-              <MaterialIcons name="camera-alt" size={24} color="#767676" />
+          )}
+        </View>
+
+        {/* Typing indicator */}
+        {isTyping && (
+          <View style={styles.typingContainer}>
+            <Text style={styles.typingText}>
+              {friendDetails.displayName || friendDetails.username} is typing...
+            </Text>
+          </View>
+        )}
+
+        {/* Mention suggestions */}
+        {mentionQuery !== null && mentionResults.length > 0 && (
+          <View style={styles.mentionContainer}>
+            <FlatList
+              data={mentionResults}
+              keyExtractor={(item) => item._id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.mentionItem}
+                  onPress={() => handleMentionSelect(item)}
+                >
+                  <Text style={styles.mentionUsername}>@{item.username}</Text>
+                  <Text style={styles.mentionDisplayName}>{item.displayName}</Text>
+                </TouchableOpacity>
+              )}
+              horizontal={false}
+              style={{ maxHeight: 150 }}
+            />
+          </View>
+        )}
+
+        {/* Reply indicator */}
+        {replyingTo && (
+          <View style={styles.replyingContainer}>
+            <View style={styles.replyingContent}>
+              <Text style={styles.replyingToText}>
+                Replying to {replyingTo.sender.displayName || replyingTo.sender.username}
+              </Text>
+              <Text style={styles.replyingMessageText} numberOfLines={1}>
+                {replyingTo.content}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={cancelReply} style={styles.cancelReplyButton}>
+              <Ionicons name="close" size={20} color="#767676" />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              sendMessageMutation.isPending && styles.sendButtonDisabled
-            ]}
-            onPress={handleSendMessage}
-            disabled={sendMessageMutation.isPending}
-          >
-            {inputText.trim() ? (
-              sendMessageMutation.isPending ? (
-                <ActivityIndicator size="small" color="#fff" />
+        )}
+
+        {/* Input area wrapped in KeyboardAvoidingView */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={80} // Adjust this to match your header height
+        >
+          <View style={[
+            styles.inputContainer,
+            keyboardVisible && styles.inputContainerKeyboard
+          ]}>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={styles.input}
+                placeholder="Message"
+                placeholderTextColor={Colors.textMuted}
+                value={inputText}
+                onChangeText={(text) => {
+                  setInputText(text);
+                  handleTyping();
+                }}
+                multiline
+                ref={inputRef}
+                maxLength={2000}
+              />
+              <TouchableOpacity style={styles.attachButton} onPress={handlePickImage}>
+                <MaterialIcons name="attach-file" size={24} color="#767676" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cameraButton}>
+                <MaterialIcons name="camera-alt" size={24} color="#767676" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                sendMessageMutation.isPending && styles.sendButtonDisabled
+              ]}
+              onPress={handleSendMessage}
+              disabled={sendMessageMutation.isPending}
+            >
+              {inputText.trim() ? (
+                sendMessageMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="send" size={20} color="#fff" />
+                )
               ) : (
-                <Ionicons name="send" size={20} color="#fff" />
-              )
-            ) : (
-              <MaterialIcons name="mic" size={24} color="#fff" />
-            )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+                <MaterialIcons name="mic" size={24} color="#fff" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
